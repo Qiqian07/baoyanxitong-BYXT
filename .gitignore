@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# 运行期生成：数据库可由 seed.py 重建，不入库
+instance/*.db
+instance/*.sqlite3
+
+# 构建产物与交接包
+*.zip
+.tmp/
+
+# PRD 的机器解析副本：原件由产品负责人保管，避免仓库里出现两个版本的 PRD
+docs/prd-extracted.md
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 开发工具记录（含会话与记忆，不入库）
+.workbuddy/
+
+# 系统
+.DS_Store
+Thumbs.db

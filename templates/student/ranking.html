@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block title %}排名榜{% endblock %}
+{% block user_sub %}{{ stu.major_name }} {{ stu.class_name[-4:] if stu.class_name else '' }}{% endblock %}
+
+{% block content %}
+{% set fmt = "%.2f" %}
+
+<!-- 截止倒计时 -->
+<section class="flex items-center rounded-card bg-fdu-red px-5 py-3 text-white shadow-card"
+         aria-label="材料填报截止倒计时" id="countdown-bar" data-freeze="{{ freeze_at }}">
+  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-white/15">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+    </svg>
+  </span>
+  <div class="ml-3">
+    <p class="text-[13px] leading-5">
+      材料填报截止：<span class="font-semibold tracking-wide">{{ freeze_at }}</span>
+    </p>
+    <p class="text-[11px] text-white/70">排名按已确认成绩实时计算，材料状态变化后顺位可能调整</p>
+  </div>
+  <div class="ml-auto flex items-center gap-3">
+    <div class="text-right">
+      <div class="text-[10px] tracking-[0.12em] text-white/65">距离截止</div>
+      <div class="font-num mt-0.5 text-[19px] font-semibold leading-none" id="countdown-text">--</div>
+    </div>
+    <span class="badge border-white/25 bg-white/10 text-white" id="countdown-tag">计算中</span>
+  </div>
+</section>
+
+<!-- 页面标题 -->
+<div class="mt-5 flex items-end justify-between">
+  <div>
+    <div class="flex items-center gap-1.5 text-[11px] text-muted">
+      <span>学生端</span><span class="text-[#b4bcc7]">/</span><span>排名榜</span>
+    </div>
+    <div class="mt-1 flex items-center gap-2.5">
+      <h1 class="text-[26px] font-semibold tracking-tight text-fdu-blue">排名榜</h1>
+      <span class="badge badge-outline">{{ year_label }}</span>
+    </div>
+    <p class="mt-1 text-[12px] text-muted">
+      管理学院 · {{ '全部专业' if not selected_major else (rows[0].major_name if rows else '该专业') }} · 按综合成绩降序
+    </p>
+  </div>
+  <div class="flex items-center gap-2">
+    <span class="badge badge-outline">保研名额 {{ quota }} 人</span>
+    {% if me %}
+      <span class="badge badge-blue">我的顺位 {{ me.rank_college }} / {{ stats.ranked }}</span>
+    {% else %}
+      <span class="badge badge-gray">未参与排名</span>
+    {% endif %}
+  </div>
+</div>
+
+<!-- 覆盖率行 -->
+<div class="sticky top-16 z-30 mt-4">
+  <div class="flex h-[54px] items-center rounded-card border border-line bg-white px-5 shadow-card">
+    <span class="hex hex-28 bg-fdu-blue text-white">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+        <path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    </span>
+    <p class="ml-3 text-[12px] text-muted">
+      基于 <strong class="font-num text-[14px] font-semibold text-ink">{{ stats.confirmed }}</strong> 名已确认学生，覆盖率
+      <strong class="font-num text-[14px] font-semibold text-fdu-blue">{{ stats.coverage }}%</strong>
+    </p>
+    <div class="ml-4 h-1.5 w-36 overflow-hidden rounded-sm bg-[#edf1f6]" aria-hidden="true">
+      <div class="h-full bg-fdu-blue" style="width: {{ stats.coverage }}%"></div>
+    </div>
+    <span class="ml-2 text-[11px] text-muted">在册 {{ stats.total_students }} 人</span>
+    <div class="ml-auto flex items-center gap-3 text-[11px] text-muted">
+      <span>保研线 {{ fmt|format(cutoff) if cutoff is not none else '—' }}</span>
+      <span class="h-3.5 w-px bg-line"></span>
+      <span class="inline-flex items-center gap-1.5 text-fdu-blue"><span class="status-dot"></span>实时计算</span>
+    </div>
+  </div>
+</div>
+
+<!-- 排名表 -->
+<section class="card mt-4" aria-labelledby="ranking-title">
+  <div class="flex items-center justify-between border-b border-line px-5 py-4">
+    <div>
+      <h2 id="ranking-title" class="text-[15px] font-semibold text-ink">有效顺位排名</h2>
+      <p class="mt-1 text-[11px] text-muted">
+        仅展示已确认学生；按综合成绩降序，同分并列同名次，依次比较绩点、竞赛、论文折算
+      </p>
+    </div>
+    <div class="flex items-center gap-5">
+      <div class="flex items-center gap-4 text-[11px] text-muted">
+        <span class="inline-flex items-center gap-1.5">
+          <span class="inline-block w-6 border-t-2 border-dashed border-fdu-red"></span>保研线
+        </span>
+        <span class="inline-flex items-center gap-1.5">
+          <span class="inline-block h-3 w-2 border-l-[3px] border-fdu-blue bg-[#edf4fb]"></span>我的位置
+        </span>
+      </div>
+      <div class="h-5 w-px bg-line"></div>
+      <form method="get" action="{{ url_for('student_ranking') }}">
+        <select name="major" class="select h-8 w-[150px] text-[12px]" onchange="this.form.submit()" aria-label="选择专业">
+          <option value="">全部专业</option>
+          {% for m in majors %}
+            <option value="{{ m.id }}" {{ 'selected' if selected_major == m.id }}>{{ m.name }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th class="w-[100px]">有效顺位</th>
+        <th class="w-[130px]">姓名</th>
+        <th class="w-[180px]">班级</th>
+        <th class="w-[150px]">综合成绩</th>
+        <th class="w-[120px]">绩点折算</th>
+        <th class="w-[120px]">竞赛折算</th>
+        <th class="w-[120px]">论文折算</th>
+        <th class="w-[110px]">状态</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      {% if loop.index == quota + 1 %}
+        <tr class="cutoff-row">
+          <td colspan="8">
+            <span class="cutoff-line"><span>保研线 · 第 {{ quota }} 名 {{ fmt|format(cutoff) }} 分</span></span>
+          </td>
+        </tr>
+      {% endif %}
+      <tr class="{{ 'current' if me and row.student_id == me.student_id }}">
+        <td class="font-num font-semibold {{ 'text-fdu-red' if quota and row.rank_college > quota else 'text-fdu-blue' }}">
+          {{ "%02d"|format(row.rank_college) }}
+        </td>
+        <td class="font-medium">
+          {{ row.masked_name }}
+          {% if me and row.student_id == me.student_id %}<span class="ml-1 text-[10px] text-fdu-blue">（我）</span>{% endif %}
+        </td>
+        <td class="text-muted">{{ row.class_name or row.major_name }}</td>
+        <td class="font-num score-strong">{{ fmt|format(row.total) }}</td>
+        <td class="font-num text-muted">{{ fmt|format(row.gpa_score) }}</td>
+        <td class="font-num text-muted">{{ fmt|format(row.comp_score) }}</td>
+        <td class="font-num text-muted">{{ fmt|format(row.paper_score) }}</td>
+        <td><span class="badge badge-blue">已确认</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="py-10 text-center text-[13px] text-muted">该专业暂无已确认参与的学生</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="flex items-center justify-between border-t border-line px-5 py-3.5">
+    <p class="text-[11px] text-muted">
+      学生姓名已做脱敏处理（保留姓氏与末字），仅用于结果公示参考。
+    </p>
+    <p class="text-[11px] text-muted">共 {{ rows|length }} 人参与排名</p>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var bar = document.getElementById("countdown-bar");
+    var target = new Date((bar.dataset.freeze || "").replace(/-/g, "/"));
+    var textEl = document.getElementById("countdown-text");
+    var tagEl = document.getElementById("countdown-tag");
+    function tick() {
+      var diff = target - new Date();
+      if (isNaN(diff)) { textEl.textContent = "未设置"; return; }
+      if (diff <= 0) { textEl.textContent = "已截止"; tagEl.textContent = "已关闭"; return; }
+      var d = Math.floor(diff / 86400000), h = Math.floor(diff % 86400000 / 3600000);
+      var m = Math.floor(diff % 3600000 / 60000), s = Math.floor(diff % 60000 / 1000);
+      var pad = function (n) { return n < 10 ? "0" + n : "" + n; };
+      textEl.textContent = pad(d) + " 天 " + pad(h) + ":" + pad(m) + ":" + pad(s);
+      tagEl.textContent = d < 3 ? "最后 " + (d + 1) + " 天" : "剩余 " + d + " 天";
+    }
+    tick(); setInterval(tick, 1000);
+  })();
+</script>
+{% endblock %}

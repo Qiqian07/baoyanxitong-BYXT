@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}{{ code }}{% endblock %}
+
+{% block content %}
+<div class="flex min-h-[60vh] items-center justify-center">
+  <section class="card w-[440px] px-8 py-10 text-center">
+    <div class="font-num text-[64px] font-semibold leading-none text-fdu-blue">{{ code }}</div>
+    <p class="mt-4 text-[14px] text-ink">{{ message }}</p>
+    <p class="mt-2 text-[12px] text-muted">如果这不是你预期的结果，可以返回上一页或首页重试。</p>
+    <div class="mt-6 flex items-center justify-center gap-3">
+      <a href="javascript:history.back()" class="btn btn-secondary">返回上一页</a>
+      <a href="{{ url_for('home') }}" class="btn btn-primary">回到首页</a>
+    </div>
+  </section>
+</div>
+{% endblock %}
