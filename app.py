@@ -227,21 +227,35 @@ def create_app():
         majors = db.execute("SELECT id, name FROM major WHERE is_active = 1 ORDER BY id").fetchall()
 
         major_id = request.args.get("major", type=int)
-        rows = ranking["rows"]
-        if major_id:
-            rows = [r for r in rows if r["major_id"] == major_id]
-
         me = next((r for r in ranking["rows"] if r["student_id"] == stu["id"]), None)
+
+        # PRD 8.1 / 验收标准②：学生仅见本人名次与参与排名总人数，
+        # 接口不得返回其他学生的姓名、学号或分数。
+        # 默认 strict 只下发本人一行；学院确需公示完整榜单时，
+        # 由管理员把 sys_config.student_ranking_scope 改为 full。
+        scope = get_config(db, "student_ranking_scope", "strict")
+        if scope == "full":
+            rows = ranking["rows"]
+            if major_id:
+                rows = [r for r in rows if r["major_id"] == major_id]
+        else:
+            rows = [me] if me else []
+
+        cutoff = scoring.cutoff_score(ranking, quota)
+        gap = scoring.round2(me["total"] - cutoff) if (me and cutoff is not None) else None
+
         return render_template(
             "student/ranking.html",
             year=year,
             stu=stu,
             rows=rows,
             me=me,
+            scope=scope,
+            gap=gap,
             majors=majors,
             selected_major=major_id,
             quota=quota,
-            cutoff=scoring.cutoff_score(ranking, quota),
+            cutoff=cutoff,
             stats=ranking["stats"],
             freeze_at=get_config(db, "freeze_at"),
             year_label=get_config(db, "academic_year_label"),
@@ -338,11 +352,24 @@ def create_app():
     @role_required("STUDENT")
     def delete_competition(cid):
         db = get_db()
+        year = current_year(db)
         stu = get_current_student(db)
         row = db.execute("SELECT * FROM competition WHERE id = ? AND student_id = ?",
                          (cid, stu["id"])).fetchone()
         if row is None:
             abort(404)
+
+        # PRD 8.2：已提交、已通过及冻结后的数据不可删除，仅草稿可删。
+        # 页面上的删除按钮在锁定态不渲染，但接口必须自己拦——
+        # 否则构造一个 POST 就能绕过界面删掉已计入排名的数据。
+        part = get_participation(db, stu["id"], year)
+        if part and part["status"] == "CONFIRMED":
+            flash("已确认参与，数据不可删除。如需修改请先撤回。", "error")
+            return redirect(url_for("student_entry"))
+        if row["status"] != "DRAFT":
+            flash("该条记录已提交，不可删除。", "error")
+            return redirect(url_for("student_entry"))
+
         db.execute("DELETE FROM competition WHERE id = ?", (cid,))
         log_action(db, "删除竞赛", "competition", cid, row["name"])
         db.commit()
@@ -382,11 +409,22 @@ def create_app():
     @role_required("STUDENT")
     def delete_paper(pid):
         db = get_db()
+        year = current_year(db)
         stu = get_current_student(db)
         row = db.execute("SELECT * FROM paper WHERE id = ? AND student_id = ?",
                          (pid, stu["id"])).fetchone()
         if row is None:
             abort(404)
+
+        # 同 delete_competition：草稿才可删，锁定态一律拒绝（PRD 8.2）
+        part = get_participation(db, stu["id"], year)
+        if part and part["status"] == "CONFIRMED":
+            flash("已确认参与，数据不可删除。如需修改请先撤回。", "error")
+            return redirect(url_for("student_entry"))
+        if row["status"] != "DRAFT":
+            flash("该条记录已提交，不可删除。", "error")
+            return redirect(url_for("student_entry"))
+
         db.execute("DELETE FROM paper WHERE id = ?", (pid,))
         log_action(db, "删除论文", "paper", pid, row["title"])
         db.commit()

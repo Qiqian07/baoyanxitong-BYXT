@@ -156,6 +156,14 @@ def _assign_rank(rows, key_score, out_key):
             prev_score = score
 
 
+# 单项排名的三个口径：(分数字段, 名次字段, 参排名人数字段)
+SINGLE_RANK_KEYS = (
+    ("gpa_score", "rank_gpa", "rank_gpa_total"),
+    ("comp_score", "rank_comp", "rank_comp_total"),
+    ("paper_score", "rank_paper", "rank_paper_total"),
+)
+
+
 def build_ranking(db, year):
     """算出该年度的完整榜单。
 
@@ -245,6 +253,21 @@ def build_ranking(db, year):
         by_major.setdefault(r["major_id"], []).append(r)
     for group in by_major.values():
         _assign_rank(group, "total", "rank_major")
+
+    # 单项指标排名（PRD 8.1：绩点 / 竞赛 / 论文），学院内口径。
+    # 该项得分为 0 的学生不参与该单项排名，名次留空——
+    # 否则一堆 0 分会并列成第 100 名，看起来像系统坏了。
+    for score_key, rank_key, total_key in SINGLE_RANK_KEYS:
+        for r in ranked:
+            r[rank_key] = None
+            r[total_key] = 0
+        pool = sorted(
+            (r for r in ranked if r[score_key] > 0),
+            key=lambda r: (-r[score_key], r["student_no"]),
+        )
+        _assign_rank(pool, score_key, rank_key)
+        for r in pool:
+            r[total_key] = len(pool)
 
     total_students = len(students)
     stats = {

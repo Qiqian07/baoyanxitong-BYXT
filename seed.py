@@ -143,6 +143,9 @@ def main():
         ("freeze_at", freeze_at, "材料填报截止时间"),
         ("academic_year_label", "2026—2027 学年", "页面展示的学年"),
         ("current_year", str(YEAR), "当前推免年度"),
+        # PRD 8.1：学生仅见本人名次与总人数。
+        # strict = 只下发本人数据（合规默认值）；full = 展示完整脱敏榜单（需学院决定）。
+        ("student_ranking_scope", "strict", "学生端榜单范围：strict 仅本人 / full 完整公示榜"),
     ]:
         db.execute("INSERT INTO sys_config (key, value, remark) VALUES (?,?,?)",
                    (key, value, remark))
