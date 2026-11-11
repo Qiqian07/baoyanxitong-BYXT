@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}保研评估系统{% endblock %} · 武汉纺织大学管理学院</title>
+  <script src="{{ url_for('static', filename='js/tailwind.js') }}"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            "fdu-blue": "#003378",
+            "fdu-blue-dark": "#002a63",
+            "fdu-blue-50": "#eef3fa",
+            "fdu-red": "#a61625",
+            "fdu-red-50": "#fbf1f2",
+            canvas: "#f5f6f8",
+            ink: "#1f2937",
+            muted: "#6b7280",
+            line: "#e7ebf0"
+          },
+          boxShadow: { card: "0 2px 8px rgba(0,0,0,0.06)" },
+          borderRadius: { card: "8px" }
+        }
+      }
+    };
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+</head>
+<body class="bg-canvas text-ink">
+<header class="sticky top-0 z-40 bg-fdu-blue text-white">
+  <div class="shell flex h-16 items-center">
+    <a href="{{ url_for('home') }}" class="flex shrink-0 items-center gap-3" aria-label="返回首页">
+      <span class="relative inline-flex">
+        <span class="hex hex-36 bg-white text-[16px] font-bold text-fdu-blue">纺</span>
+        <span class="hex hex-corner" aria-hidden="true"></span>
+      </span>
+      <span class="leading-tight">
+        <span class="block text-[15px] font-semibold tracking-wide">保研评估系统</span>
+        <span class="mt-0.5 block text-[10px] tracking-[0.06em] text-white/55">武汉纺织大学 · 管理学院</span>
+      </span>
+    </a>
+
+    <nav class="ml-7 flex h-16 items-center" aria-label="主导航">
+      {% if current_user.role == 'STUDENT' %}
+        <a href="{{ url_for('student_scores') }}"
+           class="nav-link {{ 'nav-link-active' if request.endpoint == 'student_scores' }}">我的成绩</a>
+        <a href="{{ url_for('student_ranking') }}"
+           class="nav-link {{ 'nav-link-active' if request.endpoint == 'student_ranking' }}">排名榜</a>
+        <a href="{{ url_for('student_entry') }}"
+           class="nav-link {{ 'nav-link-active' if request.endpoint and request.endpoint.startswith('student_entry') }}">材料填报</a>
+      {% elif current_user.role == 'COUNSELOR' %}
+        <a href="{{ url_for('counselor_students') }}"
+           class="nav-link {{ 'nav-link-active' if request.endpoint == 'counselor_students' }}">班级排名</a>
+        <span class="nav-link nav-link-disabled" aria-disabled="true"
+              title="材料审核在 V1.1 版本开放">材料审核</span>
+      {% else %}
+        <a href="{{ url_for('admin_rules') }}"
+           class="nav-link {{ 'nav-link-active' if request.endpoint == 'admin_rules' }}">评分规则</a>
+        <a href="{{ url_for('counselor_students') }}"
+           class="nav-link {{ 'nav-link-active' if request.endpoint == 'counselor_students' }}">学院排名</a>
+      {% endif %}
+    </nav>
+
+    <div class="ml-auto flex items-center gap-3">
+      <span class="badge border-white/20 bg-white/10 text-white">{{ current_user.role_label }}</span>
+      <span class="h-4 w-px bg-white/15"></span>
+      <div class="text-right leading-tight">
+        <div class="text-[12px] font-medium">{{ current_user.name }}</div>
+        <div class="mt-0.5 text-[10px] text-white/55">
+          {% block user_sub %}{{ role_label[current_user.role] }}{% endblock %}
+        </div>
+      </div>
+      <span class="hex hex-32 bg-white/15 text-[12px] font-medium text-white">
+        {{ current_user.name[0] if current_user.name else '·' }}
+      </span>
+      <a href="{{ url_for('change_password') }}" class="ml-1 text-[11px] text-white/60 transition-colors hover:text-white">修改密码</a>
+      <a href="{{ url_for('logout') }}" class="ml-1 text-[11px] text-white/60 transition-colors hover:text-white">退出</a>
+    </div>
+  </div>
+</header>
+
+<main class="shell pb-2 pt-5">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="flash-bar {{ 'flash-ok' if category == 'success' else 'flash-err' }}">
+          <span class="flash-dot"></span>
+          <span>{{ message }}</span>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="shell flex items-center justify-between py-6 text-[11px] text-[#8b97a6]">
+  <span>© 2026 武汉纺织大学管理学院 · 本科教学办公室</span>
+  <span>V1.0 排名计算引擎 · 数据实时计算</span>
+</footer>
+</body>
+</html>

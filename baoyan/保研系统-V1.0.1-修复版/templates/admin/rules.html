@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}评分规则{% endblock %}
+
+{% block content %}
+{% set fmt = "%.2f" %}
+
+<div class="mt-2 flex items-end justify-between">
+  <div>
+    <div class="flex items-center gap-1.5 text-[11px] text-muted">
+      <span>管理端</span><span class="text-[#b4bcc7]">/</span><span>评分规则</span>
+    </div>
+    <div class="mt-1 flex items-center gap-2.5">
+      <h1 class="text-[26px] font-semibold tracking-tight text-fdu-blue">评分规则</h1>
+      <span class="badge badge-outline">{{ year_label }}</span>
+      <span class="badge badge-blue">当前版本 {{ rule.version }}</span>
+    </div>
+    <p class="mt-1 text-[12px] text-muted">
+      {{ year }} 届推免 · 权重修改后所有学生的排名立即按新规则重算
+    </p>
+  </div>
+  <div class="flex items-center gap-2">
+    <span class="badge badge-outline">保研名额 {{ quota }} 人</span>
+    <span class="badge badge-outline">保研线 {{ fmt|format(cutoff) if cutoff is not none else '—' }}</span>
+  </div>
+</div>
+
+<div class="mt-4 grid grid-cols-3 gap-4">
+  <!-- 权重配置 -->
+  <section class="card col-span-2">
+    <div class="border-b border-line px-5 py-4">
+      <h2 class="text-[15px] font-semibold text-ink">权重要素</h2>
+      <p class="mt-1 text-[11px] text-muted">三项合计必须为 100%，保存后生成新版本并立即重算排名</p>
+    </div>
+    <form method="post" action="{{ url_for('admin_rules') }}" class="px-5 py-5">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div class="space-y-4">
+        {% for f in [
+            {'name':'gpa_weight','label':'绩点折算','value':rule.gpa_weight,'hint':'学业成绩权重，通常占比最高'},
+            {'name':'comp_weight','label':'竞赛折算','value':rule.comp_weight,'hint':'学科竞赛加分权重'},
+            {'name':'paper_weight','label':'论文折算','value':rule.paper_weight,'hint':'论文发表加分权重'}
+        ] %}
+        <div class="flex items-center gap-4">
+          <div class="w-[110px] shrink-0 text-[13px] font-medium text-ink">{{ f.label }}</div>
+          <div class="relative w-[140px]">
+            <input name="{{ f.name }}" type="number" step="0.1" min="0" max="100"
+                   class="input pr-8 font-num" value="{{ f.value }}" required />
+            <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-muted">%</span>
+          </div>
+          <div class="h-1.5 flex-1 overflow-hidden rounded-sm bg-[#edf1f6]">
+            <div class="h-full bg-fdu-blue" style="width: {{ f.value }}%"></div>
+          </div>
+          <div class="w-[190px] shrink-0 text-[11px] text-muted">{{ f.hint }}</div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="mt-5 flex items-center justify-between border-t border-line pt-4">
+        <p class="text-[11px] text-muted">
+          合计：<span class="font-num font-semibold text-fdu-blue">{{ rule.gpa_weight + rule.comp_weight + rule.paper_weight }}%</span>
+          <span class="mx-2 text-[#c3cad4]">|</span>
+          修改留痕，旧版本转入历史可查
+        </p>
+        <button type="submit" class="btn btn-primary">保存并重算排名</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- 排名预览 -->
+  <section class="card">
+    <div class="border-b border-line px-5 py-4">
+      <h2 class="text-[15px] font-semibold text-ink">当前前 5 名</h2>
+      <p class="mt-1 text-[11px] text-muted">按当前规则实时计算</p>
+    </div>
+    <ul class="divide-y divide-line">
+      {% for r in top %}
+      <li class="flex items-center gap-3 px-5 py-3">
+        <span class="font-num w-6 text-[13px] font-semibold {{ 'text-fdu-blue' if loop.index <= quota else 'text-fdu-red' }}">
+          {{ "%02d"|format(r.rank_college) }}
+        </span>
+        <span class="text-[13px] font-medium">{{ r.masked_name }}</span>
+        <span class="ml-auto font-num text-[13px] font-semibold text-ink">{{ fmt|format(r.total) }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="border-t border-line px-5 py-3 text-[11px] text-muted">
+      覆盖率 {{ stats.coverage }}%（{{ stats.confirmed }} / {{ stats.total_students }}）
+    </div>
+  </section>
+</div>
+
+<!-- 折算系数 -->
+<section class="card mt-4">
+  <div class="border-b border-line px-5 py-4">
+    <h2 class="text-[15px] font-semibold text-ink">折算系数</h2>
+    <p class="mt-1 text-[11px] text-muted">
+      竞赛分 = 级别×奖项系数 × 本人排名系数；论文分 = 分区基准分 × 作者排序系数
+    </p>
+  </div>
+  <div class="grid grid-cols-2 gap-0">
+    <div class="border-r border-line px-5 py-4">
+      <h3 class="text-[13px] font-semibold text-ink">竞赛折算（满分 100）</h3>
+      <table class="data-table mt-3">
+        <thead>
+          <tr><th>级别</th><th>一等奖</th><th>二等奖</th><th>三等奖</th></tr>
+        </thead>
+        <tbody>
+          {% for level, awards in rule.comp_coef.items() %}
+          <tr>
+            <td class="font-medium">{{ {'NATIONAL':'国家级','PROVINCIAL':'省级','SCHOOL':'校级'}[level] }}</td>
+            <td class="font-num">{{ awards.FIRST }}</td>
+            <td class="font-num">{{ awards.SECOND }}</td>
+            <td class="font-num">{{ awards.THIRD }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="mt-2 text-[11px] text-muted">本人排名系数：第 1 位 100% / 第 2 位 70% / 第 3 位 50% / 其他 30%</p>
+    </div>
+    <div class="px-5 py-4">
+      <h3 class="text-[13px] font-semibold text-ink">论文折算（满分 100）</h3>
+      <table class="data-table mt-3">
+        <thead>
+          <tr><th>分区</th><th>基准分</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          {% for key, val in rule.paper_coef.items() %}
+          <tr>
+            <td class="font-medium">{{ key }} 类</td>
+            <td class="font-num">{{ val }}</td>
+            <td class="text-muted text-[12px]">
+              {{ {'A':'权威期刊 / 顶会','B':'核心期刊 / 高水平会议','C':'一般期刊','D':'校级刊物'}[key] }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="mt-2 text-[11px] text-muted">作者排序系数：第 1 作者 100% / 第 2 作者 60% / 第 3 作者 40% / 其他 20%</p>
+    </div>
+  </div>
+</section>
+
+<!-- 版本历史 -->
+<section class="card mt-4">
+  <div class="border-b border-line px-5 py-4">
+    <h2 class="text-[15px] font-semibold text-ink">规则版本历史</h2>
+    <p class="mt-1 text-[11px] text-muted">每次修改权重都会生成新版本，旧版本归档保留，排名可追溯</p>
+  </div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th class="w-[160px]">版本</th>
+        <th class="w-[110px]">绩点权重</th>
+        <th class="w-[110px]">竞赛权重</th>
+        <th class="w-[110px]">论文权重</th>
+        <th class="w-[120px]">状态</th>
+        <th>生效时间</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for h in history %}
+      <tr>
+        <td class="font-medium font-num">{{ h.version }}</td>
+        <td class="font-num">{{ h.gpa_weight }}%</td>
+        <td class="font-num">{{ h.comp_weight }}%</td>
+        <td class="font-num">{{ h.paper_weight }}%</td>
+        <td>
+          <span class="badge {{ 'badge-blue' if h.status == 'ACTIVE' else 'badge-gray' }}">
+            {{ '生效中' if h.status == 'ACTIVE' else '已归档' }}
+          </span>
+        </td>
+        <td class="text-muted">{{ h.effective_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

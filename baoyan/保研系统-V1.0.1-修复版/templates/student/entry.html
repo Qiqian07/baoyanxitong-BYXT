@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+{% block title %}材料填报{% endblock %}
+{% block user_sub %}{{ stu.major_name }} {{ stu.class_name[-4:] if stu.class_name else '' }}{% endblock %}
+
+{% block content %}
+{% set fmt = "%.2f" %}
+
+<div class="mt-2 flex items-end justify-between">
+  <div>
+    <div class="flex items-center gap-1.5 text-[11px] text-muted">
+      <span>学生端</span><span class="text-[#b4bcc7]">/</span><span>材料填报</span>
+    </div>
+    <div class="mt-1 flex items-center gap-2.5">
+      <h1 class="text-[26px] font-semibold tracking-tight text-fdu-blue">材料填报</h1>
+      {% if locked %}
+        <span class="badge badge-blue"><span class="status-dot"></span>已锁定</span>
+      {% else %}
+        <span class="badge badge-outline">草稿</span>
+      {% endif %}
+    </div>
+    <p class="mt-1 text-[12px] text-muted">{{ year_label }} · 录入绩点、学科竞赛与论文，确认后计入排名</p>
+  </div>
+  <div class="text-right">
+    {% if locked %}
+      <form method="post" action="{{ url_for('withdraw_participation') }}"
+            onsubmit="return confirm('撤回后数据恢复可编辑，同时退出排名，确定吗？')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button class="btn btn-danger-outline">撤回确认</button>
+      </form>
+      <p class="mt-1.5 text-[11px] text-muted">撤回后可继续修改，重新确认才会计入排名</p>
+    {% else %}
+      <form method="post" action="{{ url_for('confirm_participation') }}"
+            onsubmit="return confirm('确认后数据锁定并计入预估排名，冻结前可撤回。确定吗？')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button class="btn btn-primary" {{ 'disabled' if not stu.gpa }}>确认参与</button>
+      </form>
+      <p class="mt-1.5 text-[11px] text-muted">
+        {{ '请先填写绩点' if not stu.gpa else '确认后数据锁定，排名立即更新' }}
+      </p>
+    {% endif %}
+  </div>
+</div>
+
+{% if locked %}
+<div class="mt-4 flex items-center gap-2 rounded-card border border-fdu-blue/20 bg-fdu-blue-50 px-4 py-3 text-[12px] text-fdu-blue">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 1 1 8 0v3" />
+  </svg>
+  数据已确认并锁定，当前为只读状态。如需修改请先「撤回确认」，撤回后本条数据将暂时退出排名。
+</div>
+{% endif %}
+
+<!-- 绩点 -->
+<section class="card mt-4">
+  <div class="flex items-center justify-between border-b border-line px-5 py-4">
+    <div>
+      <h2 class="text-[15px] font-semibold text-ink">绩点</h2>
+      <p class="mt-1 text-[11px] text-muted">
+        5.0 制，取值 0–5.00，保留两位小数；折算公式：绩点 ÷ {{ rule.gpa_scale|int }} × 100
+      </p>
+    </div>
+    <span class="badge badge-outline">权重 {{ rule.gpa_weight|int }}%</span>
+  </div>
+  <div class="px-5 py-4">
+    {% if locked %}
+      <div class="flex items-end gap-3">
+        <span class="font-num text-[34px] font-semibold leading-none text-fdu-blue">{{ stu.gpa }}</span>
+        <span class="pb-1 text-[12px] text-muted">/ {{ rule.gpa_scale|int }}.0</span>
+        <span class="ml-4 pb-1 text-[12px] text-muted">
+          折算成绩 <strong class="font-num text-ink">{{ fmt|format(stu.gpa / rule.gpa_scale * 100) }}</strong>
+        </span>
+      </div>
+    {% else %}
+      <form method="post" action="{{ url_for('update_gpa') }}" class="flex items-end gap-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="w-[180px]">
+          <label for="gpa" class="field-label">当前绩点</label>
+          <input id="gpa" name="gpa" type="number" step="0.01" min="0" max="5"
+                 class="input" value="{{ stu.gpa if stu.gpa else '' }}" placeholder="如 4.62" required />
+        </div>
+        <button type="submit" class="btn btn-primary">保存绩点</button>
+        <span class="pb-2.5 text-[11px] text-muted">
+          {% if stu.gpa_updated_at %}上次更新：{{ stu.gpa_updated_at }}{% else %}尚未填写{% endif %}
+        </span>
+      </form>
+    {% endif %}
+  </div>
+</section>
+
+<!-- 竞赛 -->
+<section class="card mt-4">
+  <div class="flex items-center justify-between border-b border-line px-5 py-4">
+    <div>
+      <h2 class="text-[15px] font-semibold text-ink">学科竞赛</h2>
+      <p class="mt-1 text-[11px] text-muted">
+        按「级别 × 获奖等级 × 本人排名」查系数后累加，封顶 {{ rule.comp_cap|int }} 分
+      </p>
+    </div>
+    <span class="badge badge-outline">权重 {{ rule.comp_weight|int }}%</span>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>竞赛名称</th>
+        <th class="w-[110px]">级别</th>
+        <th class="w-[110px]">获奖等级</th>
+        <th class="w-[100px]">本人排名</th>
+        <th class="w-[130px]">获奖时间</th>
+        <th class="w-[100px]">折算分</th>
+        <th class="w-[80px]"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in comps %}
+      <tr>
+        <td class="font-medium">{{ c.name }}</td>
+        <td class="text-muted">{{ level_label[c.level] }}</td>
+        <td class="text-muted">{{ award_label[c.award] }}</td>
+        <td class="font-num text-muted">第 {{ c.team_rank }} 位</td>
+        <td class="text-muted">{{ c.award_date or '—' }}</td>
+        <td class="font-num score-strong">{{ fmt|format(rule.comp_coef[c.level][c.award] * ([1.0,0.7,0.5][c.team_rank-1] if c.team_rank in [1,2,3] else 0.3)) }}</td>
+        <td class="text-right">
+          {% if not locked %}
+          <form method="post" action="{{ url_for('delete_competition', cid=c.id) }}"
+                onsubmit="return confirm('删除这条竞赛记录？')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <button class="btn btn-ghost btn-sm text-fdu-red">删除</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="py-8 text-center text-[13px] text-muted">还没有录入竞赛，没有可跳过</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if not locked %}
+  <form method="post" action="{{ url_for('add_competition') }}"
+        class="grid grid-cols-12 items-end gap-3 border-t border-line bg-[#fafbfc] px-5 py-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <div class="col-span-5">
+      <label class="field-label">竞赛名称</label>
+      <input name="name" class="input" placeholder="如 全国大学生市场调查与分析大赛" required />
+    </div>
+    <div class="col-span-2">
+      <label class="field-label">级别</label>
+      <select name="level" class="select" required>
+        <option value="NATIONAL">国家级</option>
+        <option value="PROVINCIAL">省级</option>
+        <option value="SCHOOL">校级</option>
+      </select>
+    </div>
+    <div class="col-span-2">
+      <label class="field-label">获奖等级</label>
+      <select name="award" class="select" required>
+        <option value="FIRST">一等奖</option>
+        <option value="SECOND">二等奖</option>
+        <option value="THIRD">三等奖</option>
+      </select>
+    </div>
+    <div class="col-span-1">
+      <label class="field-label">本人排名</label>
+      <select name="team_rank" class="select">
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4+</option>
+      </select>
+    </div>
+    <div class="col-span-1">
+      <label class="field-label">获奖时间</label>
+      <input name="award_date" type="date" class="input px-2" />
+    </div>
+    <div class="col-span-1">
+      <button type="submit" class="btn btn-primary w-full">添加</button>
+    </div>
+  </form>
+  {% endif %}
+</section>
+
+<!-- 论文 -->
+<section class="card mt-4">
+  <div class="flex items-center justify-between border-b border-line px-5 py-4">
+    <div>
+      <h2 class="text-[15px] font-semibold text-ink">论文</h2>
+      <p class="mt-1 text-[11px] text-muted">
+        按「分区基准分 × 作者排序系数」累加，封顶 {{ rule.paper_cap|int }} 分
+      </p>
+    </div>
+    <span class="badge badge-outline">权重 {{ rule.paper_weight|int }}%</span>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>论文标题</th>
+        <th class="w-[170px]">期刊 / 会议</th>
+        <th class="w-[110px]">收录分区</th>
+        <th class="w-[100px]">作者排序</th>
+        <th class="w-[130px]">发表时间</th>
+        <th class="w-[100px]">折算分</th>
+        <th class="w-[80px]"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in papers %}
+      <tr>
+        <td class="font-medium">{{ p.title }}</td>
+        <td class="text-muted">{{ p.venue or '—' }}</td>
+        <td class="text-muted">{{ index_label[p.index_type] }}</td>
+        <td class="font-num text-muted">第 {{ p.author_order }} 作者</td>
+        <td class="text-muted">{{ p.publish_date or '—' }}</td>
+        <td class="font-num score-strong">{{ fmt|format(rule.paper_coef[p.index_type] * ([1.0,0.6,0.4][p.author_order-1] if p.author_order in [1,2,3] else 0.2)) }}</td>
+        <td class="text-right">
+          {% if not locked %}
+          <form method="post" action="{{ url_for('delete_paper', pid=p.id) }}"
+                onsubmit="return confirm('删除这篇论文记录？')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <button class="btn btn-ghost btn-sm text-fdu-red">删除</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="py-8 text-center text-[13px] text-muted">还没有录入论文，没有可跳过</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if not locked %}
+  <form method="post" action="{{ url_for('add_paper') }}"
+        class="grid grid-cols-12 items-end gap-3 border-t border-line bg-[#fafbfc] px-5 py-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <div class="col-span-5">
+      <label class="field-label">论文标题</label>
+      <input name="title" class="input" placeholder="论文完整标题" required />
+    </div>
+    <div class="col-span-2">
+      <label class="field-label">期刊 / 会议</label>
+      <input name="venue" class="input" placeholder="如 中国管理科学" />
+    </div>
+    <div class="col-span-2">
+      <label class="field-label">收录分区</label>
+      <select name="index_type" class="select" required>
+        <option value="A">A 类</option><option value="B">B 类</option>
+        <option value="C">C 类</option><option value="D">D 类</option>
+      </select>
+    </div>
+    <div class="col-span-1">
+      <label class="field-label">作者排序</label>
+      <select name="author_order" class="select">
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4+</option>
+      </select>
+    </div>
+    <div class="col-span-1">
+      <label class="field-label">发表时间</label>
+      <input name="publish_date" type="date" class="input px-2" />
+    </div>
+    <div class="col-span-1">
+      <button type="submit" class="btn btn-primary w-full">添加</button>
+    </div>
+  </form>
+  {% endif %}
+</section>
+
+<p class="mt-4 px-1 text-[11px] text-muted">
+  本版本为 V1.0 排名计算引擎：数据确认后直接计入预估排名，暂不含辅导员审核环节（V1.1 开放）。
+  佐证材料上传功能将在 V1.1 随审核流一并开放。
+</p>
+{% endblock %}

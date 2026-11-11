@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>登录 · 保研评估系统 | 武汉纺织大学管理学院</title>
+  <script src="{{ url_for('static', filename='js/tailwind.js') }}"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            "fdu-blue": "#003378", "fdu-blue-dark": "#002a63", "fdu-blue-50": "#eef3fa",
+            "fdu-red": "#a61625", "fdu-red-50": "#fbf1f2",
+            canvas: "#f5f6f8", ink: "#1f2937", muted: "#6b7280", line: "#e7ebf0"
+          },
+          boxShadow: { card: "0 2px 8px rgba(0,0,0,0.06)" },
+          borderRadius: { card: "8px" }
+        }
+      }
+    };
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+</head>
+<body class="bg-canvas text-ink">
+  <header class="bg-fdu-blue text-white">
+    <div class="shell flex h-[72px] items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="relative inline-flex">
+          <span class="hex hex-40 bg-white text-[18px] font-bold text-fdu-blue">纺</span>
+          <span class="hex hex-corner" aria-hidden="true"></span>
+        </span>
+        <div class="leading-tight">
+          <div class="text-[16px] font-semibold tracking-wide">武汉纺织大学 · 管理学院</div>
+          <div class="mt-0.5 text-[10px] tracking-[0.14em] text-white/55">
+            SCHOOL OF MANAGEMENT, WUHAN TEXTILE UNIVERSITY
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 text-xs text-white/70">
+        <span class="inline-flex h-6 items-center rounded border border-white/20 px-2 text-[11px] text-white/80">
+          2027 届推免工作
+        </span>
+        <span class="h-4 w-px bg-white/20"></span>
+        <span>管理端 · 学生端统一入口</span>
+      </div>
+    </div>
+  </header>
+  <div class="h-1 bg-fdu-blue-dark"></div>
+
+  <main class="flex min-h-[calc(100vh-77px)] items-center justify-center py-12">
+    <div class="w-[440px]">
+      <section class="card overflow-hidden" aria-labelledby="login-title">
+        <div class="h-1.5 bg-fdu-blue"></div>
+        <div class="px-9 pb-8 pt-7">
+          <div class="flex items-center gap-3">
+            <span class="relative inline-flex">
+              <span class="hex hex-44 bg-fdu-blue text-[19px] font-bold text-white">纺</span>
+              <span class="hex hex-corner" aria-hidden="true"></span>
+            </span>
+            <div>
+              <div class="text-[20px] font-semibold tracking-wide text-fdu-blue">保研评估系统</div>
+              <div class="mt-0.5 text-[11px] text-muted">推免资格评估与材料审核平台</div>
+            </div>
+          </div>
+
+          <div class="mt-7">
+            <h1 id="login-title" class="text-[24px] font-semibold tracking-tight text-ink">登录</h1>
+            <p class="mt-1.5 text-[13px] text-muted">请使用学号或工号登录，系统自动识别角色</p>
+          </div>
+
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+              <div class="mt-4 rounded-md border border-fdu-red/25 bg-fdu-red-50 px-3 py-2 text-[12px] text-fdu-red">
+                {{ message }}
+              </div>
+            {% endfor %}
+          {% endwith %}
+
+          <form method="post" action="{{ url_for('login') }}" novalidate>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <div class="mt-5" role="group" aria-label="选择登录角色">
+              <div class="grid grid-cols-3 gap-1 rounded-md bg-[#f4f6f8] p-1">
+                <button type="button" data-role="student" data-hint="请输入学号" aria-pressed="true" class="role-tab role-tab-active">学生</button>
+                <button type="button" data-role="counselor" data-hint="请输入工号" aria-pressed="false" class="role-tab">辅导员</button>
+                <button type="button" data-role="admin" data-hint="请输入工号" aria-pressed="false" class="role-tab">管理员</button>
+              </div>
+              <input type="hidden" name="role" id="role-input" value="student" />
+            </div>
+
+            <div class="mt-5">
+              <label for="account" class="field-label">学号 / 工号</label>
+              <div class="relative">
+                <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8b97a6]">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M20 21a8 8 0 0 0-16 0" /><circle cx="12" cy="7" r="4" />
+                  </svg>
+                </span>
+                <input id="account" name="account" type="text" class="input pl-10" value="{{ account }}"
+                       placeholder="请输入学号" autocomplete="username" required />
+              </div>
+            </div>
+
+            <div class="mt-4">
+              <label for="password" class="field-label">密码</label>
+              <div class="relative">
+                <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8b97a6]">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 1 1 8 0v3" />
+                  </svg>
+                </span>
+                <input id="password" name="password" type="password" class="input px-10"
+                       placeholder="请输入登录密码" autocomplete="current-password" required />
+                <button type="button" id="toggle-pwd" aria-label="显示密码"
+                  class="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-[#8b97a6] transition-colors hover:bg-[#f3f6f9] hover:text-fdu-blue">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" /><circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="mt-3 flex items-center justify-between">
+              <label class="flex cursor-pointer items-center gap-2 text-[12px] text-muted">
+                <input type="checkbox" class="h-[14px] w-[14px] accent-[#003378]" name="remember" />
+                记住账号
+              </label>
+              <a href="#" class="text-[12px] text-fdu-blue hover:underline hover:underline-offset-2">忘记密码？</a>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-lg mt-5 w-full">
+              登录
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12h14" /><path d="m13 6 6 6-6 6" />
+              </svg>
+            </button>
+          </form>
+
+          <div class="mt-5 flex items-start gap-2 rounded-md bg-[#f7f9fb] px-3 py-2.5 text-[11px] leading-5 text-muted">
+            <svg class="mt-0.5 shrink-0 text-[#8b97a6]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" />
+            </svg>
+            <p>本系统仅限校内授权人员使用。登录、查看与审核行为均会留痕，请妥善保管账号。</p>
+          </div>
+
+          <div class="mt-4 rounded-md border border-dashed border-[#d6dde7] px-3 py-2 text-[11px] leading-5 text-muted">
+            <span class="font-medium text-ink">演示账号</span>
+            （初始密码 <span class="font-num text-fdu-blue">wt2026</span>，首次登录需修改）·
+            学生 <span class="font-num">2023010101</span> ·
+            辅导员 <span class="font-num">T2001</span> ·
+            管理员 <span class="font-num">A1001</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="mt-5 flex items-center justify-between px-1 text-[11px] text-[#8b97a6]">
+        <span>© 2026 武汉纺织大学管理学院</span>
+        <div class="flex items-center gap-4">
+          <a href="#" class="transition-colors hover:text-fdu-blue">使用帮助</a>
+          <a href="#" class="transition-colors hover:text-fdu-blue">隐私说明</a>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      var tabs = document.querySelectorAll(".role-tab");
+      var accountInput = document.getElementById("account");
+      var roleInput = document.getElementById("role-input");
+      tabs.forEach(function (tab) {
+        tab.addEventListener("click", function () {
+          tabs.forEach(function (item) {
+            var active = item === tab;
+            item.classList.toggle("role-tab-active", active);
+            item.setAttribute("aria-pressed", String(active));
+          });
+          accountInput.placeholder = tab.dataset.hint;
+          roleInput.value = tab.dataset.role;
+        });
+      });
+
+      var pwd = document.getElementById("password");
+      document.getElementById("toggle-pwd").addEventListener("click", function () {
+        pwd.type = pwd.type === "password" ? "text" : "password";
+      });
+    })();
+  </script>
+</body>
+</html>

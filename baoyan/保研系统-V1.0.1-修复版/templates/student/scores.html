@@ -1,0 +1,328 @@
+{% extends "base.html" %}
+{% block title %}我的成绩{% endblock %}
+{% block user_sub %}{{ stu.major_name }} {{ stu.class_name[-4:] if stu.class_name else '' }}{% endblock %}
+
+{% block content %}
+{% set fmt = "%.2f" %}
+{% set confirmed = me is not none %}
+
+<!-- 截止倒计时 -->
+<section class="flex items-center rounded-card {{ 'bg-fdu-red' if confirmed else 'bg-fdu-blue' }} px-5 py-3 text-white shadow-card"
+         aria-label="材料填报截止倒计时" id="countdown-bar" data-freeze="{{ freeze_at }}">
+  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-white/15">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+    </svg>
+  </span>
+  <div class="ml-3">
+    <p class="text-[13px] leading-5">
+      材料填报截止：<span class="font-semibold tracking-wide">{{ freeze_at }}</span>
+    </p>
+    <p class="text-[11px] text-white/70">
+      {% if confirmed %}已确认参与并锁定数据，如需修改请先撤回确认
+      {% else %}逾期系统将自动关闭确认入口，请预留材料核验时间{% endif %}
+    </p>
+  </div>
+  <div class="ml-auto flex items-center gap-3">
+    <div class="text-right">
+      <div class="text-[10px] tracking-[0.12em] text-white/65">距离截止</div>
+      <div class="font-num mt-0.5 text-[19px] font-semibold leading-none" id="countdown-text">--</div>
+    </div>
+    <span class="badge border-white/25 bg-white/10 text-white" id="countdown-tag">计算中</span>
+  </div>
+</section>
+
+<!-- 页面标题 -->
+<div class="mt-5 flex items-end justify-between">
+  <div>
+    <div class="flex items-center gap-1.5 text-[11px] text-muted">
+      <span>学生端</span><span class="text-[#b4bcc7]">/</span><span>我的成绩</span>
+    </div>
+    <div class="mt-1 flex items-center gap-2.5">
+      <h1 class="text-[26px] font-semibold tracking-tight text-fdu-blue">我的成绩</h1>
+      {% if confirmed %}
+        <span class="badge badge-blue"><span class="status-dot"></span>已确认参与</span>
+      {% else %}
+        <span class="badge badge-gray">未确认参与</span>
+      {% endif %}
+    </div>
+    <p class="mt-1 text-[12px] text-muted">{{ year_label }} · {{ year }} 届推免 · 综合评估</p>
+  </div>
+  <div class="text-right">
+    <div class="flex items-center gap-2">
+      <a href="{{ url_for('student_entry') }}" class="btn btn-secondary">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+        </svg>
+        材料填报
+      </a>
+      {% if confirmed %}
+      <form method="post" action="{{ url_for('withdraw_participation') }}" class="inline"
+            onsubmit="return confirm('撤回后本条数据将退出排名并恢复可编辑，确定撤回吗？')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button type="submit" class="btn btn-danger-outline">撤回确认</button>
+      </form>
+      {% else %}
+      <form method="post" action="{{ url_for('confirm_participation') }}" class="inline"
+            onsubmit="return confirm('确认后数据将被锁定并计入预估排名，冻结前可撤回。确定确认参与吗？')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button type="submit" class="btn btn-primary" {{ 'disabled' if not stu.gpa }}>确认参与</button>
+      </form>
+      {% endif %}
+    </div>
+    <p class="mt-1.5 text-[11px] text-muted">
+      {% if confirmed %}数据已锁定，撤回后需重新提交{% else %}确认参与后方可进入预估排名{% endif %}
+    </p>
+  </div>
+</div>
+
+<!-- 评估进度 -->
+<section class="card mt-4 flex items-center px-5 py-3" aria-label="保研评估进度">
+  <div class="mr-5 shrink-0 text-[11px] font-medium text-muted">评估进度</div>
+  <ol class="flex flex-1 items-center">
+    <li class="flex items-center gap-2 whitespace-nowrap">
+      <span class="hex hex-26 bg-fdu-blue text-white">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m5 12 4 4L19 6" />
+        </svg>
+      </span>
+      <span class="text-[12px] text-ink">资格确认</span>
+    </li>
+    <li class="step-line mx-3" aria-hidden="true"></li>
+    <li class="flex items-center gap-2 whitespace-nowrap">
+      <span class="hex hex-26 {{ 'bg-fdu-blue text-white' if confirmed else 'bg-[#e8edf3] text-[#7d8a9b]' }} text-[11px] font-semibold">2</span>
+      <span class="text-[12px] {{ 'font-medium text-fdu-blue' if not confirmed else 'text-ink' }}">材料填报</span>
+    </li>
+    <li class="step-line mx-3" aria-hidden="true"></li>
+    <li class="flex items-center gap-2 whitespace-nowrap">
+      <span class="hex hex-26 bg-[#e8edf3] text-[11px] font-semibold text-[#7d8a9b]">3</span>
+      <span class="text-[12px] text-[#7d8a9b]">学院审核</span>
+      <span class="text-[11px] text-[#8b97a6]">V1.1</span>
+    </li>
+    <li class="step-line mx-3" aria-hidden="true"></li>
+    <li class="flex items-center gap-2 whitespace-nowrap">
+      <span class="hex hex-26 bg-[#e8edf3] text-[11px] font-semibold text-[#7d8a9b]">4</span>
+      <span class="text-[12px] text-[#7d8a9b]">学校公示</span>
+      <span class="text-[11px] text-[#8b97a6]">V1.1</span>
+    </li>
+  </ol>
+  <div class="ml-5 shrink-0 text-[11px] text-muted">当前阶段：材料填报</div>
+</section>
+
+{% if not confirmed %}
+<!-- 未确认提示 -->
+<section class="card mt-4 flex items-center border-l-[3px] border-l-fdu-blue px-4 py-3" aria-label="待办事项">
+  <span class="hex hex-32 bg-fdu-blue-50 text-[16px] font-semibold text-fdu-blue">!</span>
+  <div class="ml-3 min-w-0">
+    <h2 class="text-[13px] font-semibold text-ink">还没有确认参与</h2>
+    <p class="mt-0.5 text-[12px] text-muted">
+      填写绩点与材料后点击右上角「确认参与」，系统才会把你计入预估排名。当前不占名次。
+    </p>
+  </div>
+  <a href="{{ url_for('student_entry') }}" class="btn btn-primary btn-sm ml-auto shrink-0">去填报</a>
+</section>
+{% endif %}
+
+<!-- 综合成绩主卡 -->
+<section class="relative mt-4 overflow-hidden rounded-card bg-fdu-blue px-7 py-6 text-white shadow-card" aria-label="综合成绩">
+  <div class="flex items-center">
+    <div class="w-[350px] shrink-0">
+      <div class="text-[12px] tracking-[0.08em] text-white/65">综合成绩</div>
+      <div class="mt-1.5 flex items-end gap-2">
+        <span class="font-num text-[56px] font-semibold leading-none tracking-tight">
+          {{ fmt|format(me.total) if confirmed else "0.00" }}
+        </span>
+        <span class="pb-1 text-[13px] text-white/50">/ 100</span>
+      </div>
+      <div class="mt-4 flex items-center gap-4 text-[12px] text-white/70">
+        <span>{% if confirmed %}学院内顺位 <strong class="font-num text-[14px] font-semibold text-white">{{ me.rank_college }} / {{ stats.ranked }}</strong>{% else %}未参与排名{% endif %}</span>
+        <span class="h-3 w-px bg-white/20"></span>
+        <span>材料状态 <strong class="font-medium text-white">{{ '已确认' if confirmed else '草稿' }}</strong></span>
+      </div>
+    </div>
+
+    <div class="mx-7 h-[86px] w-px shrink-0 bg-white/15"></div>
+
+    <div class="min-w-0 flex-1">
+      <div class="flex items-center justify-between">
+        <span class="text-[12px] text-white/65">成绩构成</span>
+        <span class="text-[11px] text-white/45">权重合计 100%</span>
+      </div>
+      <div class="mt-3 flex h-2 overflow-hidden rounded-sm bg-white/10" aria-hidden="true">
+        <div class="bg-white" style="width: {{ rule.gpa_weight }}%"></div>
+        <div class="bg-[#8fb1d6]" style="width: {{ rule.comp_weight }}%"></div>
+        <div class="bg-[#5d85b3]" style="width: {{ rule.paper_weight }}%"></div>
+      </div>
+      <div class="mt-2.5 flex items-center justify-between text-[11px] text-white/70">
+        <span class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 bg-white"></span>绩点折算 {{ rule.gpa_weight|int }}% · {{ fmt|format(me.gpa_score) if confirmed else "0.00" }}</span>
+        <span class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 bg-[#8fb1d6]"></span>竞赛折算 {{ rule.comp_weight|int }}% · {{ fmt|format(me.comp_score) if confirmed else "0.00" }}</span>
+        <span class="flex items-center gap-1.5"><span class="h-1.5 w-1.5 bg-[#5d85b3]"></span>论文折算 {{ rule.paper_weight|int }}% · {{ fmt|format(me.paper_score) if confirmed else "0.00" }}</span>
+      </div>
+    </div>
+
+    <div class="ml-8 w-[132px] shrink-0 border-l border-white/15 pl-6">
+      <div class="text-[10px] tracking-wide text-white/50">保研名额</div>
+      <div class="mt-1 font-num text-[12px] text-white/90">{{ quota }} 人</div>
+      <div class="mt-3 text-[10px] tracking-wide text-white/50">保研线</div>
+      <div class="mt-1 font-num text-[12px] text-white/90">{{ fmt|format(cutoff) if cutoff is not none else "—" }}</div>
+    </div>
+  </div>
+</section>
+
+{% if confirmed and gap is not none %}
+<div class="mt-3 flex items-center gap-2 px-1 text-[12px]">
+  {% if gap >= 0 %}
+    <span class="badge badge-blue">在保研线内</span>
+    <span class="text-muted">高出保研线 <strong class="font-num text-fdu-blue">{{ fmt|format(gap) }}</strong> 分，当前顺位 {{ me.rank_college }}</span>
+  {% else %}
+    <span class="badge badge-red">保研线外</span>
+    <span class="text-muted">距保研线 <strong class="font-num text-fdu-red">{{ fmt|format(-gap) }}</strong> 分，当前顺位 {{ me.rank_college }} / {{ stats.ranked }}</span>
+  {% endif %}
+  <span class="text-[#c3cad4]">|</span>
+  <span class="text-muted">专业内 {{ me.rank_major }} 名</span>
+</div>
+{% endif %}
+
+<!-- 三项折算明细 -->
+<section class="mt-4 grid grid-cols-3 gap-4" aria-label="成绩折算明细">
+  {% for item in [
+      {'key':'gpa','title':'绩点折算','weight':rule.gpa_weight,'score':me.gpa_score if confirmed else 0,
+       'desc':'学生录入 · 5.0 制折算','color':'#003378','source':'绩点','src2':'手工录入 · ' ~ (stu.gpa_updated_at or '未填写')},
+      {'key':'comp','title':'竞赛折算','weight':rule.comp_weight,'score':me.comp_score if confirmed else 0,
+       'desc':'学科竞赛 · 按级别与奖项折算','color':'#2f6fb3','source':'竞赛','src2':'按规则系数累加，封顶 ' ~ rule.comp_cap|int ~ ' 分'},
+      {'key':'paper','title':'论文折算','weight':rule.paper_weight,'score':me.paper_score if confirmed else 0,
+       'desc':'论文检索 · 按分区与作者排序折算','color':'#5d85b3','source':'论文','src2':'按分区基准分 × 作者系数，封顶 ' ~ rule.paper_cap|int ~ ' 分'}
+  ] %}
+  <article class="card card-hover p-5">
+    <div class="flex items-start justify-between">
+      <div class="flex items-center gap-3">
+        <span class="hex hex-40 bg-fdu-blue-50 text-fdu-blue">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            {% if item.key == 'gpa' %}
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" /><path d="M8 7h8M8 11h6" />
+            {% elif item.key == 'comp' %}
+              <path d="M8 21h8" /><path d="M12 17v4" /><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z" /><path d="M7 6H4v2a4 4 0 0 0 4 4" /><path d="M17 6h3v2a4 4 0 0 1-4 4" />
+            {% else %}
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /><path d="M8 13h8M8 17h5" />
+            {% endif %}
+          </svg>
+        </span>
+        <div>
+          <h2 class="text-[15px] font-semibold text-ink">{{ item.title }}</h2>
+          <p class="mt-0.5 text-[11px] text-muted">权重 {{ item.weight|int }}% · {{ item.desc }}</p>
+        </div>
+      </div>
+      <span class="badge {{ 'badge-blue' if confirmed else 'badge-gray' }}">{{ '已计入' if confirmed else '未计入' }}</span>
+    </div>
+    <div class="mt-5 flex items-end justify-between">
+      <div>
+        <div class="font-num text-[30px] font-semibold leading-none text-fdu-blue">{{ fmt|format(item.score) }}</div>
+        <div class="mt-1.5 text-[11px] text-muted">折算成绩 / 100</div>
+      </div>
+      <div class="text-right">
+        <div class="font-num text-[17px] font-semibold text-ink">{{ fmt|format(item.score * item.weight / 100) }}</div>
+        <div class="mt-0.5 text-[11px] text-muted">加权得分</div>
+      </div>
+    </div>
+    <div class="mt-4 h-1.5 overflow-hidden rounded-sm bg-[#edf1f6]">
+      <div class="h-full" style="width: {{ [item.score, 100]|min }}%; background: {{ item.color }}"></div>
+    </div>
+    <div class="mt-4 border-t border-line pt-3">
+      <div class="flex items-center justify-between text-[11px]">
+        <span class="text-muted">计算口径</span>
+        <a href="{{ url_for('student_entry') }}" class="text-fdu-blue hover:underline hover:underline-offset-2">查看明细</a>
+      </div>
+      <p class="mt-1 text-[12px] leading-5 text-ink">{{ item.src2 }}</p>
+    </div>
+  </article>
+  {% endfor %}
+</section>
+
+<!-- 成绩明细表 -->
+<section class="card mt-4" aria-labelledby="detail-title">
+  <div class="flex items-center justify-between border-b border-line px-5 py-4">
+    <div>
+      <h2 id="detail-title" class="text-[15px] font-semibold text-ink">成绩构成明细</h2>
+      <p class="mt-1 text-[11px] text-muted">
+        综合成绩 = 绩点折算 × {{ rule.gpa_weight|int }}% + 竞赛折算 × {{ rule.comp_weight|int }}% + 论文折算 × {{ rule.paper_weight|int }}%
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="badge badge-outline">成绩口径 {{ rule.version }}</span>
+      <a href="{{ url_for('admin_rules') if current_user.role != 'STUDENT' else '#' }}" class="btn btn-ghost btn-sm">查看计算说明</a>
+    </div>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th class="w-[180px]">模块</th>
+        <th class="w-[90px]">权重</th>
+        <th class="w-[120px]">折算成绩</th>
+        <th class="w-[120px]">加权得分</th>
+        <th>数据来源</th>
+        <th class="w-[130px]">计入状态</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="font-medium">绩点折算</td>
+        <td class="font-num text-muted">{{ rule.gpa_weight|int }}%</td>
+        <td class="font-num score-strong">{{ fmt|format(me.gpa_score) if confirmed else "0.00" }}</td>
+        <td class="font-num">{{ fmt|format(me.gpa_score * rule.gpa_weight / 100) if confirmed else "0.00" }}</td>
+        <td class="text-muted">学生录入 · 绩点 {{ stu.gpa }} / {{ stu.gpa_scale|int }}.0</td>
+        <td><span class="badge {{ 'badge-blue' if confirmed else 'badge-gray' }}">{{ '已计入' if confirmed else '未计入' }}</span></td>
+      </tr>
+      <tr>
+        <td class="font-medium">竞赛折算</td>
+        <td class="font-num text-muted">{{ rule.comp_weight|int }}%</td>
+        <td class="font-num score-strong">{{ fmt|format(me.comp_score) if confirmed else "0.00" }}</td>
+        <td class="font-num">{{ fmt|format(me.comp_score * rule.comp_weight / 100) if confirmed else "0.00" }}</td>
+        <td class="text-muted">学科竞赛 · 按级别与奖项系数折算</td>
+        <td><span class="badge {{ 'badge-blue' if confirmed else 'badge-gray' }}">{{ '已计入' if confirmed else '未计入' }}</span></td>
+      </tr>
+      <tr>
+        <td class="font-medium">论文折算</td>
+        <td class="font-num text-muted">{{ rule.paper_weight|int }}%</td>
+        <td class="font-num score-strong">{{ fmt|format(me.paper_score) if confirmed else "0.00" }}</td>
+        <td class="font-num">{{ fmt|format(me.paper_score * rule.paper_weight / 100) if confirmed else "0.00" }}</td>
+        <td class="text-muted">论文检索 · 按分区与作者排序折算</td>
+        <td><span class="badge {{ 'badge-blue' if confirmed else 'badge-gray' }}">{{ '已计入' if confirmed else '未计入' }}</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="flex items-center justify-between border-t border-line px-5 py-3.5">
+    <p class="text-[11px] text-muted">
+      合计：<span class="font-num font-semibold text-fdu-blue">{{ fmt|format(me.total) if confirmed else "0.00" }}</span>
+      <span class="mx-2 text-[#c3cad4]">|</span>
+      成绩保留两位小数，四舍五入
+    </p>
+    <p class="text-[11px] text-muted">当前覆盖率 {{ stats.coverage }}%（{{ stats.confirmed }} / {{ stats.total_students }} 人已确认）</p>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var bar = document.getElementById("countdown-bar");
+    var target = new Date((bar.dataset.freeze || "").replace(/-/g, "/"));
+    var textEl = document.getElementById("countdown-text");
+    var tagEl = document.getElementById("countdown-tag");
+
+    function tick() {
+      var diff = target - new Date();
+      if (isNaN(diff)) { textEl.textContent = "未设置"; tagEl.textContent = "—"; return; }
+      if (diff <= 0) { textEl.textContent = "已截止"; tagEl.textContent = "已关闭"; return; }
+      var d = Math.floor(diff / 86400000);
+      var h = Math.floor(diff % 86400000 / 3600000);
+      var m = Math.floor(diff % 3600000 / 60000);
+      var s = Math.floor(diff % 60000 / 1000);
+      var pad = function (n) { return n < 10 ? "0" + n : "" + n; };
+      textEl.textContent = pad(d) + " 天 " + pad(h) + ":" + pad(m) + ":" + pad(s);
+      if (d < 3) { tagEl.textContent = "最后 " + (d + 1) + " 天"; }
+      else { tagEl.textContent = "剩余 " + d + " 天"; }
+    }
+    tick(); setInterval(tick, 1000);
+  })();
+</script>
+{% endblock %}

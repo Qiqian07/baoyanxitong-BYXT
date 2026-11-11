@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}学院排名{% endblock %}
+
+{% block content %}
+{% set fmt = "%.2f" %}
+
+<div class="mt-2 flex items-end justify-between">
+  <div>
+    <div class="flex items-center gap-1.5 text-[11px] text-muted">
+      <span>{{ current_user.role_label }}</span><span class="text-[#b4bcc7]">/</span><span>学院排名</span>
+    </div>
+    <h1 class="mt-1 text-[26px] font-semibold tracking-tight text-fdu-blue">学院排名</h1>
+    <p class="mt-1 text-[12px] text-muted">{{ year_label }} · {{ year }} 届推免 · 按综合成绩降序，仅展示已确认数据</p>
+  </div>
+  <div class="flex items-center gap-2">
+    <span class="badge badge-outline">已确认 {{ stats.confirmed }} / {{ stats.total_students }}</span>
+    <span class="badge badge-outline">覆盖率 {{ stats.coverage }}%</span>
+    <span class="badge badge-blue">保研线 {{ fmt|format(cutoff) if cutoff is not none else '—' }}</span>
+  </div>
+</div>
+
+<section class="card mt-4">
+  <div class="flex items-center justify-between border-b border-line px-5 py-4">
+    <div>
+      <h2 class="text-[15px] font-semibold text-ink">有效顺位名单</h2>
+      <p class="mt-1 text-[11px] text-muted">超过保研名额的学生以红色标注顺位，便于识别临界人群</p>
+    </div>
+    <a href="{{ url_for('counselor_export') }}" class="btn btn-secondary btn-sm">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
+      </svg>
+      导出名单
+    </a>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th class="w-[90px]">顺位</th>
+        <th class="w-[120px]">姓名</th>
+        <th class="w-[90px]">学号</th>
+        <th class="w-[190px]">专业 / 班级</th>
+        <th class="w-[110px]">绩点</th>
+        <th class="w-[110px]">绩点折算</th>
+        <th class="w-[110px]">竞赛折算</th>
+        <th class="w-[110px]">论文折算</th>
+        <th class="w-[110px]">综合成绩</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr class="{{ 'beyond-quota' if quota and r.rank_college > quota }}">
+        <td class="font-num font-semibold {{ 'text-fdu-red' if quota and r.rank_college > quota else 'text-fdu-blue' }}">
+          {{ "%02d"|format(r.rank_college) }}
+        </td>
+        <td class="font-medium">{{ r.name }}</td>
+        <td class="font-num text-muted">{{ r.student_no }}</td>
+        <td class="text-muted">{{ r.major_name }} · {{ r.class_name or '—' }}</td>
+        <td class="font-num text-muted">{{ r.gpa }}</td>
+        <td class="font-num text-muted">{{ fmt|format(r.gpa_score) }}</td>
+        <td class="font-num text-muted">{{ fmt|format(r.comp_score) }}</td>
+        <td class="font-num text-muted">{{ fmt|format(r.paper_score) }}</td>
+        <td class="font-num score-strong">{{ fmt|format(r.total) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="py-10 text-center text-[13px] text-muted">暂无已确认参与的学生</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<p class="mt-3 px-1 text-[11px] text-muted">
+  本页含学生完整姓名与学号，仅限管理角色查看；导出行为会写入审计日志。
+</p>
+{% endblock %}
