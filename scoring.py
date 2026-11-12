@@ -234,6 +234,7 @@ def build_ranking(db, year):
             "masked_name": mask_name(s["name"]),
             "major_id": s["major_id"],
             "major_name": s["major_name"],
+            "class_id": s["class_id"],
             "class_name": s["class_name"],
             "gpa": s["gpa"],
             "gpa_score": gpa_s,

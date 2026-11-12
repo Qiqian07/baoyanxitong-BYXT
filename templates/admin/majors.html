@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}专业字典{% endblock %}
+
+{% block content %}
+<div class="mt-2 flex items-end justify-between">
+  <div>
+    <div class="flex items-center gap-1.5 text-[11px] text-muted">
+      <span>管理端</span><span class="text-[#b4bcc7]">/</span><span>专业字典</span>
+    </div>
+    <div class="mt-1 flex items-center gap-2.5">
+      <h1 class="text-[26px] font-semibold tracking-tight text-fdu-blue">专业字典</h1>
+      <span class="badge badge-outline">{{ year_label }}</span>
+    </div>
+    <p class="mt-1 text-[12px] text-muted">
+      专业是班级和学生的归属依据，停用后不再出现在新建班级的选项里，但历史数据保留。
+    </p>
+  </div>
+  <div class="flex items-center gap-2">
+    <a href="{{ url_for('admin_classes') }}" class="btn btn-ghost btn-sm">班级管理</a>
+    <a href="{{ url_for('admin_students') }}" class="btn btn-ghost btn-sm">学生名单</a>
+  </div>
+</div>
+
+<div class="mt-4 grid grid-cols-3 gap-4">
+  <section class="card">
+    <div class="border-b border-line px-5 py-4">
+      <h2 class="text-[15px] font-semibold text-ink">新增专业</h2>
+      <p class="mt-1 text-[11px] text-muted">专业代码可留空，填了必须唯一</p>
+    </div>
+    <form method="post" action="{{ url_for('admin_majors') }}" class="space-y-3 px-5 py-5">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div>
+        <label class="field-label">专业名称</label>
+        <input name="name" class="input" placeholder="如 电子商务" required />
+      </div>
+      <div>
+        <label class="field-label">专业代码</label>
+        <input name="code" class="input font-num" placeholder="如 120801（可留空）" />
+      </div>
+      <button type="submit" class="btn btn-primary w-full">新增专业</button>
+    </form>
+  </section>
+
+  <section class="card col-span-2">
+    <div class="border-b border-line px-5 py-4">
+      <h2 class="text-[15px] font-semibold text-ink">专业列表</h2>
+      <p class="mt-1 text-[11px] text-muted">停用不会删除数据，只是不再可选</p>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>专业名称</th>
+          <th class="w-[120px]">代码</th>
+          <th class="w-[90px]">班级数</th>
+          <th class="w-[90px]">学生数</th>
+          <th class="w-[90px]">状态</th>
+          <th class="w-[90px] text-right">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in majors %}
+        <tr>
+          <td class="font-medium">{{ m.name }}</td>
+          <td class="font-num text-muted">{{ m.code or '—' }}</td>
+          <td class="font-num text-muted">{{ m.class_count }}</td>
+          <td class="font-num text-muted">{{ m.student_count }}</td>
+          <td>
+            <span class="badge {{ 'badge-blue' if m.is_active else 'badge-gray' }}">
+              {{ '启用' if m.is_active else '已停用' }}
+            </span>
+          </td>
+          <td class="text-right">
+            <form method="post" action="{{ url_for('admin_major_toggle', mid=m.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <button class="btn btn-ghost btn-sm">
+                {{ '停用' if m.is_active else '启用' }}
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}班级管理{% endblock %}
+
+{% block content %}
+<div class="mt-2 flex items-end justify-between">
+  <div>
+    <div class="flex items-center gap-1.5 text-[11px] text-muted">
+      <span>管理端</span><span class="text-[#b4bcc7]">/</span><span>班级管理</span>
+    </div>
+    <div class="mt-1 flex items-center gap-2.5">
+      <h1 class="text-[26px] font-semibold tracking-tight text-fdu-blue">班级管理</h1>
+      <span class="badge badge-outline">{{ year_label }}</span>
+    </div>
+    <p class="mt-1 text-[12px] text-muted">
+      建班、分配辅导员。辅导员登录后只能看到自己带的班，名单不会串。
+    </p>
+  </div>
+  <div class="flex items-center gap-2">
+    <span class="badge badge-outline">共 {{ classes|length }} 个班</span>
+    <a href="{{ url_for('admin_majors') }}" class="btn btn-ghost btn-sm">专业字典</a>
+    <a href="{{ url_for('admin_students') }}" class="btn btn-ghost btn-sm">学生名单</a>
+  </div>
+</div>
+
+{% if editing %}
+<!-- 编辑班级 -->
+<section class="card mt-4">
+  <div class="flex items-center justify-between border-b border-line px-5 py-4">
+    <div>
+      <h2 class="text-[15px] font-semibold text-ink">编辑班级</h2>
+      <p class="mt-1 text-[11px] text-muted">修改后立即生效，辅导员看到的名单随之变化</p>
+    </div>
+    <a href="{{ url_for('admin_classes') }}" class="btn btn-ghost btn-sm">取消</a>
+  </div>
+  <form method="post" action="{{ url_for('admin_class_update', cid=editing.id) }}"
+        class="grid grid-cols-4 items-end gap-3 px-5 py-5">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <div>
+      <label class="field-label">班级名称</label>
+      <input name="name" class="input" value="{{ editing.name }}" required />
+    </div>
+    <div>
+      <label class="field-label">年级</label>
+      <input name="grade_year" type="number" min="2000" max="2100"
+             class="input font-num" value="{{ editing.grade_year }}" required />
+    </div>
+    <div>
+      <label class="field-label">辅导员</label>
+      <select name="counselor_id" class="select">
+        <option value="">未分配</option>
+        {% for t in counselors %}
+        <option value="{{ t.id }}" {{ 'selected' if editing.counselor_id == t.id }}>
+          {{ t.real_name }}（{{ t.username }}）
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex gap-2">
+      <button type="submit" class="btn btn-primary flex-1">保存</button>
+    </div>
+  </form>
+</section>
+{% else %}
+<div class="mt-4 grid grid-cols-3 gap-4">
+  <!-- 新建班级 -->
+  <section class="card">
+    <div class="border-b border-line px-5 py-4">
+      <h2 class="text-[15px] font-semibold text-ink">新建班级</h2>
+      <p class="mt-1 text-[11px] text-muted">班级归属一个专业，同专业下班级名不可重复</p>
+    </div>
+    <form method="post" action="{{ url_for('admin_classes') }}" class="space-y-3 px-5 py-5">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div>
+        <label class="field-label">班级名称</label>
+        <input name="name" class="input" placeholder="如 工商管理2303" required />
+      </div>
+      <div>
+        <label class="field-label">所属专业</label>
+        <select name="major_id" class="select" required>
+          {% for m in majors %}
+          <option value="{{ m.id }}">{{ m.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="field-label">年级</label>
+          <input name="grade_year" type="number" min="2000" max="2100"
+                 class="input font-num" placeholder="2023" required />
+        </div>
+        <div>
+          <label class="field-label">辅导员</label>
+          <select name="counselor_id" class="select">
+            <option value="">未分配</option>
+            {% for t in counselors %}
+            <option value="{{ t.id }}">{{ t.real_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary w-full">创建班级</button>
+    </form>
+  </section>
+
+  <!-- 班级列表 -->
+  <section class="card col-span-2">
+    <div class="border-b border-line px-5 py-4">
+      <h2 class="text-[15px] font-semibold text-ink">班级列表</h2>
+      <p class="mt-1 text-[11px] text-muted">还有学生的班级不能删除，需先把学生转到其他班</p>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>班级</th>
+          <th>专业</th>
+          <th class="w-[90px]">年级</th>
+          <th>辅导员</th>
+          <th class="w-[90px]">人数</th>
+          <th class="w-[140px] text-right">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in classes %}
+        <tr>
+          <td class="font-medium">{{ c.name }}</td>
+          <td class="text-muted">{{ c.major_name }}</td>
+          <td class="font-num text-muted">{{ c.grade_year }}</td>
+          <td>
+            {% if c.counselor_name %}
+              <span class="badge badge-blue">{{ c.counselor_name }}</span>
+            {% else %}
+              <span class="badge badge-gray">未分配</span>
+            {% endif %}
+          </td>
+          <td class="font-num {{ 'text-muted' if not c.student_count }}">{{ c.student_count }} 人</td>
+          <td class="text-right">
+            <div class="flex items-center justify-end gap-1">
+              <a href="{{ url_for('admin_classes', edit=c.id) }}" class="btn btn-ghost btn-sm">编辑</a>
+              <form method="post" action="{{ url_for('admin_class_delete', cid=c.id) }}"
+                    onsubmit="return confirm('删除班级「{{ c.name }}」？此操作不可撤销。')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <button class="btn btn-ghost btn-sm text-fdu-red">删除</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not classes %}
+        <tr><td colspan="6" class="text-center text-muted py-6">还没有班级，先在左侧新建一个</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </section>
+</div>
+{% endif %}
+{% endblock %}

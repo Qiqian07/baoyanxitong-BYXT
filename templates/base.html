@@ -60,6 +60,12 @@
            class="nav-link {{ 'nav-link-active' if request.endpoint == 'admin_rules' }}">评分规则</a>
         <a href="{{ url_for('counselor_students') }}"
            class="nav-link {{ 'nav-link-active' if request.endpoint == 'counselor_students' }}">学院排名</a>
+        <a href="{{ url_for('admin_classes') }}"
+           class="nav-link {{ 'nav-link-active' if request.endpoint and request.endpoint.startswith('admin_class') }}">班级管理</a>
+        <a href="{{ url_for('admin_majors') }}"
+           class="nav-link {{ 'nav-link-active' if request.endpoint and request.endpoint.startswith('admin_major') }}">专业字典</a>
+        <a href="{{ url_for('admin_students') }}"
+           class="nav-link {{ 'nav-link-active' if request.endpoint and request.endpoint.startswith('admin_student') }}">学生名单</a>
       {% endif %}
     </nav>
 

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}学院排名{% endblock %}
+{% block title %}{{ '我所带的班级' if current_user.role == 'COUNSELOR' else '学院排名' }}{% endblock %}
 
 {% block content %}
 {% set fmt = "%.2f" %}
@@ -7,14 +7,22 @@
 <div class="mt-2 flex items-end justify-between">
   <div>
     <div class="flex items-center gap-1.5 text-[11px] text-muted">
-      <span>{{ current_user.role_label }}</span><span class="text-[#b4bcc7]">/</span><span>学院排名</span>
+      <span>{{ current_user.role_label }}</span><span class="text-[#b4bcc7]">/</span>
+      <span>{{ '我的班级' if current_user.role == 'COUNSELOR' else '学院排名' }}</span>
     </div>
-    <h1 class="mt-1 text-[26px] font-semibold tracking-tight text-fdu-blue">学院排名</h1>
-    <p class="mt-1 text-[12px] text-muted">{{ year_label }} · {{ year }} 届推免 · 按综合成绩降序，仅展示已确认数据</p>
+    <h1 class="mt-1 text-[26px] font-semibold tracking-tight text-fdu-blue">
+      {{ '我所带的班级' if current_user.role == 'COUNSELOR' else '学院排名' }}
+    </h1>
+    <p class="mt-1 text-[12px] text-muted">
+      {{ year_label }} · {{ year }} 届推免 · 按综合成绩降序，仅展示已确认数据
+    </p>
+    {% if scope_note %}
+    <p class="mt-1 text-[11px] text-fdu-blue">{{ scope_note }}</p>
+    {% endif %}
   </div>
   <div class="flex items-center gap-2">
-    <span class="badge badge-outline">已确认 {{ stats.confirmed }} / {{ stats.total_students }}</span>
-    <span class="badge badge-outline">覆盖率 {{ stats.coverage }}%</span>
+    <span class="badge badge-outline">本页 {{ rows|length }} 人</span>
+    <span class="badge badge-outline">全院已确认 {{ stats.confirmed }} / {{ stats.total_students }}</span>
     <span class="badge badge-blue">保研线 {{ fmt|format(cutoff) if cutoff is not none else '—' }}</span>
   </div>
 </div>
@@ -23,7 +31,13 @@
   <div class="flex items-center justify-between border-b border-line px-5 py-4">
     <div>
       <h2 class="text-[15px] font-semibold text-ink">有效顺位名单</h2>
-      <p class="mt-1 text-[11px] text-muted">超过保研名额的学生以红色标注顺位，便于识别临界人群</p>
+      <p class="mt-1 text-[11px] text-muted">
+        {% if current_user.role == 'COUNSELOR' %}
+        顺位为学院内口径，便于横向比较各班学生是否够得上保研线
+        {% else %}
+        超过保研名额的学生以红色标注顺位，便于识别临界人群
+        {% endif %}
+      </p>
     </div>
     <a href="{{ url_for('counselor_export') }}" class="btn btn-secondary btn-sm">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

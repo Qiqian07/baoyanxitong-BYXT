@@ -752,6 +752,28 @@ def create_app():
 
     # ---------- 辅导员端 ----------
 
+    def scope_rows_for_role(db, rows, quota):
+        """按角色收窄可见名单。
+
+        学院管理员 / 学校管理员看全院；辅导员只看自己带的班——
+        否则「分配辅导员」这个字段就只是个摆设。名次仍用学院内顺位，
+        因为辅导员要判断的是「我这几个班里谁够得上保研线」，
+        如果按班内重新排一遍，多个班之间就没法横向比较了。
+        """
+        role = session.get("role")
+        if role != "COUNSELOR":
+            return rows, f"全院 {len(rows)} 名已确认学生"
+
+        class_ids = {r["id"] for r in db.execute(
+            "SELECT id FROM class_group WHERE counselor_id = ?", (session.get("uid"),)
+        ).fetchall()}
+        if not class_ids:
+            return [], "你名下还没有分配班级，请联系学院管理员在「班级管理」中分配"
+
+        mine = [r for r in rows if r["class_id"] in class_ids]
+        note = f"你所带的 {len(class_ids)} 个班级，共 {len(mine)} 名已确认学生"
+        return mine, note
+
     @app.route("/counselor/students")
     @role_required("COUNSELOR", "COLLEGE_ADMIN", "SCHOOL_ADMIN")
     def counselor_students():
@@ -759,10 +781,12 @@ def create_app():
         year = current_year(db)
         ranking = scoring.build_ranking(db, year)
         quota = scoring.get_quota(db)
+        rows, scope_note = scope_rows_for_role(db, ranking["rows"], quota)
         return render_template(
             "counselor/students.html",
             year=year,
-            rows=ranking["rows"],
+            rows=rows,
+            scope_note=scope_note,
             stats=ranking["stats"],
             quota=quota,
             cutoff=scoring.cutoff_score(ranking, quota),
@@ -776,20 +800,21 @@ def create_app():
         db = get_db()
         year = current_year(db)
         ranking = scoring.build_ranking(db, year)
+        # 导出和页面用同一套口径，避免辅导员导出一份自己没权限看的名单
+        rows, _ = scope_rows_for_role(db, ranking["rows"], scoring.get_quota(db))
 
         buf = io.StringIO()
         buf.write("\ufeff")
         writer = csv.writer(buf)
         writer.writerow(["顺位", "姓名", "学号", "专业", "班级",
                          "绩点", "绩点折算", "竞赛折算", "论文折算", "综合成绩"])
-        for r in ranking["rows"]:
+        for r in rows:
             writer.writerow([r["rank_college"], csv_safe(r["name"]), csv_safe(r["student_no"]),
                              csv_safe(r["major_name"]), csv_safe(r["class_name"] or ""),
                              r["gpa"], r["gpa_score"], r["comp_score"],
                              r["paper_score"], r["total"]])
 
-        log_action(db, "导出排名名单", "ranking", year,
-                   f"共 {len(ranking['rows'])} 条")
+        log_action(db, "导出排名名单", "ranking", year, f"共 {len(rows)} 条")
         db.commit()
 
         filename = f"ranking_{year}.csv"
@@ -857,6 +882,445 @@ def create_app():
             cutoff=scoring.cutoff_score(ranking, scoring.get_quota(db)),
             year_label=get_config(db, "academic_year_label"),
         )
+
+    # ---------- 组织管理（学院管理员 / 学校管理员） ----------
+    # PRD 11.2 要求「管理员可建组织」：学院、专业、班级、辅导员分配、学生名单。
+    # 本项目只服务管理学院一个学院，所以学院层不做增删，只维护专业与班级。
+
+    def _college_id(db):
+        """当前学院。单学院场景，取 id 最小的那条。"""
+        row = db.execute("SELECT id FROM college ORDER BY id LIMIT 1").fetchone()
+        return row["id"] if row else None
+
+    @app.route("/admin/classes", methods=["GET", "POST"])
+    @role_required("COLLEGE_ADMIN", "SCHOOL_ADMIN")
+    def admin_classes():
+        db = get_db()
+        college_id = _college_id(db)
+
+        if request.method == "POST":
+            name = request.form.get("name", "").strip()
+            major_id = request.form.get("major_id", type=int)
+            grade_raw = (request.form.get("grade_year") or "").strip()
+            counselor_raw = (request.form.get("counselor_id") or "").strip()
+
+            major = db.execute(
+                "SELECT id FROM major WHERE id = ? AND is_active = 1", (major_id,)
+            ).fetchone()
+            if not name or not major:
+                flash("班级名称与所属专业为必填项", "error")
+                return redirect(url_for("admin_classes"))
+
+            try:
+                grade_year = int(grade_raw)
+            except ValueError:
+                flash("年级须为四位年份，例如 2023", "error")
+                return redirect(url_for("admin_classes"))
+            if not 2000 <= grade_year <= 2100:
+                flash("年级须在 2000–2100 之间", "error")
+                return redirect(url_for("admin_classes"))
+
+            counselor_id = None
+            if counselor_raw:
+                counselor = db.execute(
+                    "SELECT id FROM sys_user WHERE id = ? AND role = 'COUNSELOR'",
+                    (counselor_raw,),
+                ).fetchone()
+                if counselor is None:
+                    flash("所选辅导员不存在", "error")
+                    return redirect(url_for("admin_classes"))
+                counselor_id = counselor["id"]
+
+            # 同一专业同一届的班级名不允许重复，否则名单会串
+            dup = db.execute(
+                "SELECT id FROM class_group WHERE major_id = ? AND name = ?",
+                (major_id, name),
+            ).fetchone()
+            if dup:
+                flash(f"「{name}」在该专业下已存在", "error")
+                return redirect(url_for("admin_classes"))
+
+            cur = db.execute(
+                "INSERT INTO class_group (major_id, name, grade_year, counselor_id) VALUES (?,?,?,?)",
+                (major_id, name, grade_year, counselor_id),
+            )
+            log_action(db, "创建班级", "class_group", cur.lastrowid, name)
+            db.commit()
+            flash(f"班级「{name}」已创建", "success")
+            return redirect(url_for("admin_classes"))
+
+        classes = db.execute(
+            """SELECT c.id, c.name, c.grade_year, c.counselor_id,
+                      m.name AS major_name, u.real_name AS counselor_name,
+                      (SELECT COUNT(*) FROM student s WHERE s.class_id = c.id) AS student_count
+               FROM class_group c
+               JOIN major m ON m.id = c.major_id
+               LEFT JOIN sys_user u ON u.id = c.counselor_id
+               WHERE m.college_id = ?
+               ORDER BY c.grade_year DESC, m.name, c.name""",
+            (college_id,),
+        ).fetchall()
+
+        majors = db.execute(
+            "SELECT id, name FROM major WHERE is_active = 1 AND college_id = ? ORDER BY name",
+            (college_id,),
+        ).fetchall()
+        counselors = db.execute(
+            "SELECT id, real_name, username FROM sys_user "
+            "WHERE role = 'COUNSELOR' AND status = 1 ORDER BY real_name"
+        ).fetchall()
+
+        edit_id = request.args.get("edit", type=int)
+        editing = None
+        if edit_id:
+            editing = db.execute(
+                "SELECT * FROM class_group WHERE id = ?", (edit_id,)
+            ).fetchone()
+
+        return render_template(
+            "admin/classes.html",
+            classes=classes, majors=majors, counselors=counselors,
+            editing=editing,
+            year_label=get_config(db, "academic_year_label"),
+        )
+
+    @app.route("/admin/classes/<int:cid>/update", methods=["POST"])
+    @role_required("COLLEGE_ADMIN", "SCHOOL_ADMIN")
+    def admin_class_update(cid):
+        db = get_db()
+        row = db.execute("SELECT * FROM class_group WHERE id = ?", (cid,)).fetchone()
+        if row is None:
+            abort(404)
+
+        name = request.form.get("name", "").strip()
+        grade_raw = (request.form.get("grade_year") or "").strip()
+        counselor_raw = (request.form.get("counselor_id") or "").strip()
+
+        if not name:
+            flash("班级名称不能为空", "error")
+            return redirect(url_for("admin_classes"))
+        try:
+            grade_year = int(grade_raw)
+        except ValueError:
+            flash("年级须为四位年份", "error")
+            return redirect(url_for("admin_classes"))
+
+        counselor_id = None
+        if counselor_raw:
+            counselor = db.execute(
+                "SELECT id FROM sys_user WHERE id = ? AND role = 'COUNSELOR'",
+                (counselor_raw,),
+            ).fetchone()
+            if counselor is None:
+                flash("所选辅导员不存在", "error")
+                return redirect(url_for("admin_classes"))
+            counselor_id = counselor["id"]
+
+        db.execute(
+            "UPDATE class_group SET name = ?, grade_year = ?, counselor_id = ? WHERE id = ?",
+            (name, grade_year, counselor_id, cid),
+        )
+        changes = f"{row['name']}({row['grade_year']}) → {name}({grade_year})"
+        if row["counselor_id"] != counselor_id:
+            old_name = db.execute("SELECT real_name FROM sys_user WHERE id = ?",
+                                  (row["counselor_id"],)).fetchone()
+            new_name = db.execute("SELECT real_name FROM sys_user WHERE id = ?",
+                                  (counselor_id,)).fetchone()
+            changes += (f"；辅导员 {old_name['real_name'] if old_name else '未分配'}"
+                        f" → {new_name['real_name'] if new_name else '未分配'}")
+        log_action(db, "修改班级", "class_group", cid, changes)
+        db.commit()
+        flash("班级信息已更新", "success")
+        return redirect(url_for("admin_classes"))
+
+    @app.route("/admin/classes/<int:cid>/delete", methods=["POST"])
+    @role_required("COLLEGE_ADMIN", "SCHOOL_ADMIN")
+    def admin_class_delete(cid):
+        db = get_db()
+        row = db.execute("SELECT * FROM class_group WHERE id = ?", (cid,)).fetchone()
+        if row is None:
+            abort(404)
+        # 班里还有人就不能删：直接删会把学生的 class_id 变成悬空外键
+        count = db.execute("SELECT COUNT(*) c FROM student WHERE class_id = ?",
+                           (cid,)).fetchone()["c"]
+        if count:
+            flash(f"「{row['name']}」还有 {count} 名学生，请先把他们转到其他班级", "error")
+            return redirect(url_for("admin_classes"))
+        db.execute("DELETE FROM class_group WHERE id = ?", (cid,))
+        log_action(db, "删除班级", "class_group", cid, row["name"])
+        db.commit()
+        flash(f"班级「{row['name']}」已删除", "success")
+        return redirect(url_for("admin_classes"))
+
+    @app.route("/admin/majors", methods=["GET", "POST"])
+    @role_required("COLLEGE_ADMIN", "SCHOOL_ADMIN")
+    def admin_majors():
+        db = get_db()
+        college_id = _college_id(db)
+
+        if request.method == "POST":
+            name = request.form.get("name", "").strip()
+            code = request.form.get("code", "").strip() or None
+            if not name:
+                flash("专业名称不能为空", "error")
+                return redirect(url_for("admin_majors"))
+            dup = db.execute(
+                "SELECT id FROM major WHERE college_id = ? AND name = ?",
+                (college_id, name),
+            ).fetchone()
+            if dup:
+                flash(f"专业「{name}」已存在", "error")
+                return redirect(url_for("admin_majors"))
+            if code:
+                dup_code = db.execute("SELECT id FROM major WHERE code = ?", (code,)).fetchone()
+                if dup_code:
+                    flash(f"专业代码「{code}」已被占用", "error")
+                    return redirect(url_for("admin_majors"))
+
+            cur = db.execute(
+                "INSERT INTO major (college_id, name, code, is_active) VALUES (?,?,?,1)",
+                (college_id, name, code),
+            )
+            log_action(db, "创建专业", "major", cur.lastrowid, name)
+            db.commit()
+            flash(f"专业「{name}」已创建", "success")
+            return redirect(url_for("admin_majors"))
+
+        majors = db.execute(
+            """SELECT m.id, m.name, m.code, m.is_active,
+                      (SELECT COUNT(*) FROM class_group c WHERE c.major_id = m.id) AS class_count,
+                      (SELECT COUNT(*) FROM student s WHERE s.major_id = m.id) AS student_count
+               FROM major m WHERE m.college_id = ?
+               ORDER BY m.is_active DESC, m.name""",
+            (college_id,),
+        ).fetchall()
+        return render_template("admin/majors.html", majors=majors,
+                               year_label=get_config(db, "academic_year_label"))
+
+    @app.route("/admin/majors/<int:mid>/toggle", methods=["POST"])
+    @role_required("COLLEGE_ADMIN", "SCHOOL_ADMIN")
+    def admin_major_toggle(mid):
+        db = get_db()
+        row = db.execute("SELECT * FROM major WHERE id = ?", (mid,)).fetchone()
+        if row is None:
+            abort(404)
+        new_state = 0 if row["is_active"] else 1
+        db.execute("UPDATE major SET is_active = ? WHERE id = ?", (new_state, mid))
+        action = "启用专业" if new_state else "停用专业"
+        log_action(db, action, "major", mid, row["name"])
+        db.commit()
+        flash(f"专业「{row['name']}」已{'启用' if new_state else '停用'}", "success")
+        return redirect(url_for("admin_majors"))
+
+    @app.route("/admin/students", methods=["GET"])
+    @role_required("COLLEGE_ADMIN", "SCHOOL_ADMIN")
+    def admin_students():
+        db = get_db()
+        year = current_year(db)
+        college_id = _college_id(db)
+
+        class_id = request.args.get("class", type=int)
+        major_id = request.args.get("major", type=int)
+        keyword = (request.args.get("q") or "").strip()
+
+        sql = """SELECT s.id, s.student_no, s.name, s.grade_year, s.class_id, s.major_id,
+                        s.gpa, m.name AS major_name, c.name AS class_name,
+                        u.real_name AS counselor_name
+                 FROM student s
+                 JOIN major m ON m.id = s.major_id
+                 LEFT JOIN class_group c ON c.id = s.class_id
+                 LEFT JOIN sys_user u ON u.id = c.counselor_id
+                 WHERE m.college_id = ?"""
+        params = [college_id]
+        if class_id:
+            sql += " AND s.class_id = ?"
+            params.append(class_id)
+        if major_id:
+            sql += " AND s.major_id = ?"
+            params.append(major_id)
+        if keyword:
+            sql += " AND (s.name LIKE ? OR s.student_no LIKE ?)"
+            params += [f"%{keyword}%", f"%{keyword}%"]
+        sql += " ORDER BY m.name, c.name, s.student_no"
+        students = db.execute(sql, params).fetchall()
+
+        # 排名信息（只含已确认参与的学生），用于在名单里直接看成绩
+        ranking = scoring.build_ranking(db, year)
+        rank_map = {r["student_id"]: r for r in ranking["rows"]}
+
+        classes = db.execute(
+            """SELECT c.id, c.name, c.grade_year FROM class_group c
+               JOIN major m ON m.id = c.major_id
+               WHERE m.college_id = ? ORDER BY c.grade_year DESC, c.name""",
+            (college_id,),
+        ).fetchall()
+        majors = db.execute(
+            "SELECT id, name FROM major WHERE college_id = ? ORDER BY is_active DESC, name",
+            (college_id,),
+        ).fetchall()
+
+        # 单人调整学籍：点「调整」后顶部展开表单，避免 146 行各挂一个下拉框
+        edit_id = request.args.get("edit", type=int)
+        editing = None
+        if edit_id:
+            editing = db.execute(
+                """SELECT s.id, s.student_no, s.name, s.class_id, s.major_id,
+                          m.name AS major_name, c.name AS class_name
+                   FROM student s JOIN major m ON m.id = s.major_id
+                   LEFT JOIN class_group c ON c.id = s.class_id
+                   WHERE s.id = ?""", (edit_id,)
+            ).fetchone()
+
+        return render_template(
+            "admin/students.html",
+            students=students, classes=classes, majors=majors, rank_map=rank_map,
+            editing=editing,
+            selected_class=class_id, selected_major=major_id, keyword=keyword,
+            year_label=get_config(db, "academic_year_label"),
+        )
+
+    @app.route("/admin/students/<int:sid>/assign", methods=["POST"])
+    @role_required("COLLEGE_ADMIN", "SCHOOL_ADMIN")
+    def admin_student_assign(sid):
+        """调整学生的专业 / 班级。PRD 要求留痕并通知，这里先做到留痕。"""
+        db = get_db()
+        stu = db.execute(
+            """SELECT s.*, m.name AS major_name, c.name AS class_name
+               FROM student s JOIN major m ON m.id = s.major_id
+               LEFT JOIN class_group c ON c.id = s.class_id
+               WHERE s.id = ?""", (sid,)
+        ).fetchone()
+        if stu is None:
+            abort(404)
+
+        class_raw = (request.form.get("class_id") or "").strip()
+        new_class_id = int(class_raw) if class_raw else None
+
+        if new_class_id is None:
+            new_class = None
+        else:
+            new_class = db.execute(
+                "SELECT c.*, m.name AS major_name FROM class_group c "
+                "JOIN major m ON m.id = c.major_id WHERE c.id = ?", (new_class_id,)
+            ).fetchone()
+            if new_class is None:
+                flash("所选班级不存在", "error")
+                return redirect(request.referrer or url_for("admin_students"))
+
+        # 班级决定专业：学生专业必须与所入班级的专业一致，否则统计口径会错位
+        new_major_id = new_class["major_id"] if new_class else stu["major_id"]
+
+        if new_class_id == stu["class_id"] and new_major_id == stu["major_id"]:
+            flash("专业与班级都没有变化", "info")
+            return redirect(request.referrer or url_for("admin_students"))
+
+        db.execute(
+            "UPDATE student SET class_id = ?, major_id = ? WHERE id = ?",
+            (new_class_id, new_major_id, sid),
+        )
+        detail = (f"{stu['name']}：{stu['major_name']}/"
+                  f"{stu['class_name'] or '未分班'} → "
+                  f"{new_class['major_name'] if new_class else stu['major_name']}/"
+                  f"{new_class['name'] if new_class else '未分班'}")
+        log_action(db, "调整学生学籍", "student", sid, detail)
+        db.commit()
+        flash(f"{stu['name']} 的学籍已调整", "success")
+        return redirect(request.referrer or url_for("admin_students"))
+
+    @app.route("/admin/students/import", methods=["POST"])
+    @role_required("COLLEGE_ADMIN", "SCHOOL_ADMIN")
+    def admin_students_import():
+        """批量导入学生名单（CSV）。
+
+        列顺序：学号,姓名,专业名称,班级名称,年级
+        已存在的学号跳过而不是覆盖——覆盖会把学生刚录的绩点冲掉。
+        """
+        db = get_db()
+        upload = request.files.get("file")
+        if upload is None or not upload.filename:
+            flash("请选择要导入的 CSV 文件", "error")
+            return redirect(url_for("admin_students"))
+
+        raw = upload.read()
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("gbk", errors="replace")
+
+        reader = csv.reader(io.StringIO(text))
+        rows = [r for r in reader if any((c or "").strip() for c in r)]
+        if not rows:
+            flash("文件里没有数据", "error")
+            return redirect(url_for("admin_students"))
+
+        # 首行是表头就跳过
+        if rows and ("学号" in rows[0][0] or "student_no" in rows[0][0].lower()):
+            rows = rows[1:]
+
+        majors = {r["name"]: r["id"] for r in
+                  db.execute("SELECT id, name FROM major").fetchall()}
+        classes = {}
+        for r in db.execute(
+            "SELECT c.id, c.name, c.major_id FROM class_group c"
+        ).fetchall():
+            classes[(r["major_id"], r["name"])] = r["id"]
+
+        created, skipped, errors = 0, 0, []
+        for lineno, row in enumerate(rows, start=2):
+            cells = [(c or "").strip() for c in row]
+            if len(cells) < 4:
+                errors.append(f"第 {lineno} 行：列数不足（需 学号,姓名,专业,班级,年级）")
+                continue
+            student_no, name, major_name, class_name = cells[:4]
+            grade_raw = cells[4] if len(cells) > 4 else ""
+
+            if not student_no or not name:
+                errors.append(f"第 {lineno} 行：学号或姓名为空")
+                continue
+            if major_name not in majors:
+                errors.append(f"第 {lineno} 行：专业「{major_name}」不存在")
+                continue
+            if db.execute("SELECT id FROM student WHERE student_no = ?",
+                          (student_no,)).fetchone():
+                skipped += 1
+                continue
+
+            major_id = majors[major_name]
+            class_id = classes.get((major_id, class_name))
+            if class_name and class_id is None:
+                errors.append(f"第 {lineno} 行：班级「{class_name}」不属于专业「{major_name}」")
+                continue
+            try:
+                grade_year = int(grade_raw) if grade_raw else None
+            except ValueError:
+                errors.append(f"第 {lineno} 行：年级「{grade_raw}」不是数字")
+                continue
+
+            cur = db.execute(
+                "INSERT INTO sys_user (username, password_hash, role, real_name, must_change_pwd) "
+                "VALUES (?,?,'STUDENT',?,1)",
+                (student_no, generate_password_hash("wt2026"), name),
+            )
+            db.execute(
+                "INSERT INTO student (user_id, student_no, name, major_id, class_id, grade_year) "
+                "VALUES (?,?,?,?,?,?)",
+                (cur.lastrowid, student_no, name, major_id, class_id, grade_year),
+            )
+            created += 1
+
+        log_action(db, "批量导入学生", "student", None,
+                   f"新增 {created} 人，跳过 {skipped} 人，失败 {len(errors)} 行")
+        db.commit()
+
+        msg = f"导入完成：新增 {created} 人，已存在跳过 {skipped} 人"
+        if errors:
+            msg += f"；{len(errors)} 行有问题：" + "；".join(errors[:3])
+            if len(errors) > 3:
+                msg += f"…（共 {len(errors)} 条）"
+            flash(msg, "error")
+        else:
+            flash(msg, "success")
+        return redirect(url_for("admin_students"))
 
     # ---------- 错误页 ----------
 

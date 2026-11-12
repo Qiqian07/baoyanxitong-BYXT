@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}学生名单{% endblock %}
+
+{% block content %}
+{% set fmt = "%.2f" %}
+
+<div class="mt-2 flex items-end justify-between">
+  <div>
+    <div class="flex items-center gap-1.5 text-[11px] text-muted">
+      <span>管理端</span><span class="text-[#b4bcc7]">/</span><span>学生名单</span>
+    </div>
+    <div class="mt-1 flex items-center gap-2.5">
+      <h1 class="text-[26px] font-semibold tracking-tight text-fdu-blue">学生名单</h1>
+      <span class="badge badge-outline">{{ year_label }}</span>
+      <span class="badge badge-blue">当前 {{ students|length }} 人</span>
+    </div>
+    <p class="mt-1 text-[12px] text-muted">
+      调整学籍会写入审计日志；批量导入只新增，已存在的学号自动跳过，不会覆盖学生已录的绩点。
+    </p>
+  </div>
+  <div class="flex items-center gap-2">
+    <a href="{{ url_for('admin_classes') }}" class="btn btn-ghost btn-sm">班级管理</a>
+    <a href="{{ url_for('admin_majors') }}" class="btn btn-ghost btn-sm">专业字典</a>
+  </div>
+</div>
+
+{% if editing %}
+<!-- 调整学籍 -->
+<section class="card mt-4">
+  <div class="flex items-center justify-between border-b border-line px-5 py-4">
+    <div>
+      <h2 class="text-[15px] font-semibold text-ink">
+        调整学籍 · {{ editing.name }} <span class="font-num text-muted">（{{ editing.student_no }}）</span>
+      </h2>
+      <p class="mt-1 text-[11px] text-muted">
+        当前：{{ editing.major_name }} / {{ editing.class_name or '未分班' }}
+        <span class="mx-1 text-[#c3cad4]">|</span>
+        专业由班级决定，换班后专业自动跟随
+      </p>
+    </div>
+    <a href="{{ url_for('admin_students', class=selected_class, major=selected_major, q=keyword) }}"
+       class="btn btn-ghost btn-sm">取消</a>
+  </div>
+  <form method="post" action="{{ url_for('admin_student_assign', sid=editing.id) }}"
+        class="flex items-end gap-3 px-5 py-5">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <div class="w-[360px]">
+      <label class="field-label">转入班级</label>
+      <select name="class_id" class="select">
+        <option value="">不分班</option>
+        {% for c in classes %}
+        <option value="{{ c.id }}" {{ 'selected' if editing.class_id == c.id }}>
+          {{ c.name }}（{{ c.grade_year }} 级）
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">保存调整</button>
+  </form>
+</section>
+{% endif %}
+
+<!-- 筛选 -->
+<section class="card mt-4">
+  <form method="get" action="{{ url_for('admin_students') }}"
+        class="flex items-end gap-3 px-5 py-4">
+    <div class="w-[200px]">
+      <label class="field-label">班级</label>
+      <select name="class" class="select">
+        <option value="">全部班级</option>
+        {% for c in classes %}
+        <option value="{{ c.id }}" {{ 'selected' if selected_class == c.id }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="w-[200px]">
+      <label class="field-label">专业</label>
+      <select name="major" class="select">
+        <option value="">全部专业</option>
+        {% for m in majors %}
+        <option value="{{ m.id }}" {{ 'selected' if selected_major == m.id }}>{{ m.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="w-[220px]">
+      <label class="field-label">姓名 / 学号</label>
+      <input name="q" class="input" value="{{ keyword }}" placeholder="输入关键字" />
+    </div>
+    <button type="submit" class="btn btn-primary">筛选</button>
+    <a href="{{ url_for('admin_students') }}" class="btn btn-ghost">重置</a>
+  </form>
+</section>
+
+<div class="mt-4 grid grid-cols-4 gap-4">
+  <!-- 批量导入 -->
+  <section class="card">
+    <div class="border-b border-line px-5 py-4">
+      <h2 class="text-[15px] font-semibold text-ink">批量导入</h2>
+      <p class="mt-1 text-[11px] text-muted">CSV 列顺序：学号,姓名,专业,班级,年级</p>
+    </div>
+    <form method="post" action="{{ url_for('admin_students_import') }}"
+          enctype="multipart/form-data" class="space-y-3 px-5 py-5">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div>
+        <label class="field-label">选择文件</label>
+        <input type="file" name="file" accept=".csv,text/csv" class="input" required />
+      </div>
+      <button type="submit" class="btn btn-primary w-full">导入</button>
+      <div class="rounded-lg bg-[#f7f9fc] px-3 py-2 text-[11px] leading-relaxed text-muted">
+        首行表头可有可无。专业名与班级名必须已存在，否则该行报错跳过。
+        新账号初始密码 <span class="font-num text-fdu-blue">wt2026</span>，首次登录强制改密。
+      </div>
+    </form>
+  </section>
+
+  <!-- 名单 -->
+  <section class="card col-span-3">
+    <div class="flex items-center justify-between border-b border-line px-5 py-4">
+      <h2 class="text-[15px] font-semibold text-ink">名单</h2>
+      <span class="text-[11px] text-muted">综合成绩仅对已确认参与的学生显示</span>
+    </div>
+    <div class="max-h-[560px] overflow-auto">
+      <table class="data-table">
+        <thead class="sticky top-0 bg-white">
+          <tr>
+            <th class="w-[110px]">学号</th>
+            <th class="w-[90px]">姓名</th>
+            <th>专业</th>
+            <th>班级</th>
+            <th class="w-[80px]">绩点</th>
+            <th class="w-[90px]">顺位</th>
+            <th class="w-[90px]">综合成绩</th>
+            <th class="w-[80px] text-right">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in students %}
+          {% set r = rank_map.get(s.id) %}
+          <tr>
+            <td class="font-num text-muted">{{ s.student_no }}</td>
+            <td class="font-medium">{{ s.name }}</td>
+            <td class="text-muted">{{ s.major_name }}</td>
+            <td class="text-muted">{{ s.class_name or '未分班' }}</td>
+            <td class="font-num">{{ fmt|format(s.gpa) }}</td>
+            <td class="font-num text-muted">{{ r.rank_college if r else '—' }}</td>
+            <td class="font-num {{ 'score-strong' if r }}">{{ fmt|format(r.total) if r else '—' }}</td>
+            <td class="text-right">
+              <a href="{{ url_for('admin_students', edit=s.id, class=selected_class, major=selected_major, q=keyword) }}"
+                 class="btn btn-ghost btn-sm">调整</a>
+            </td>
+          </tr>
+          {% endfor %}
+          {% if not students %}
+          <tr><td colspan="8" class="py-6 text-center text-muted">没有匹配的学生</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
