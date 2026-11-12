@@ -47,3 +47,24 @@ def init_db_command():
 def register(app):
     app.teardown_appcontext(close_db)
     app.cli.add_command(init_db_command)
+    ensure_schema(app)
+
+
+def ensure_schema(app):
+    """给已经存在的旧库补列，避免改表结构就必须删库重建。
+
+    V1.0.1 新增：sys_user.failed_attempts / sys_user.locked_until
+    （登录失败计数与锁定时间，见 PRD 13 章「连续 5 次错误锁定 30 分钟」）。
+    """
+    with app.app_context():
+        db = get_db()
+        cols = {row["name"] for row in db.execute("PRAGMA table_info(sys_user)").fetchall()}
+        if not cols:            # 库还没建表，交给 seed.py / flask init-db
+            close_db()
+            return
+        if "failed_attempts" not in cols:
+            db.execute("ALTER TABLE sys_user ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0")
+        if "locked_until" not in cols:
+            db.execute("ALTER TABLE sys_user ADD COLUMN locked_until TEXT")
+        db.commit()
+        close_db()

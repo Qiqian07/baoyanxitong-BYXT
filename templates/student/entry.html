@@ -24,12 +24,14 @@
     {% if locked %}
       <form method="post" action="{{ url_for('withdraw_participation') }}"
             onsubmit="return confirm('撤回后数据恢复可编辑，同时退出排名，确定吗？')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <button class="btn btn-danger-outline">撤回确认</button>
       </form>
       <p class="mt-1.5 text-[11px] text-muted">撤回后可继续修改，重新确认才会计入排名</p>
     {% else %}
       <form method="post" action="{{ url_for('confirm_participation') }}"
             onsubmit="return confirm('确认后数据锁定并计入预估排名，冻结前可撤回。确定吗？')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <button class="btn btn-primary" {{ 'disabled' if not stu.gpa }}>确认参与</button>
       </form>
       <p class="mt-1.5 text-[11px] text-muted">
@@ -70,6 +72,7 @@
       </div>
     {% else %}
       <form method="post" action="{{ url_for('update_gpa') }}" class="flex items-end gap-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <div class="w-[180px]">
           <label for="gpa" class="field-label">当前绩点</label>
           <input id="gpa" name="gpa" type="number" step="0.01" min="0" max="5"
@@ -116,11 +119,12 @@
         <td class="text-muted">{{ award_label[c.award] }}</td>
         <td class="font-num text-muted">第 {{ c.team_rank }} 位</td>
         <td class="text-muted">{{ c.award_date or '—' }}</td>
-        <td class="font-num score-strong">{{ fmt|format(rule.comp_coef[c.level][c.award] * ([1.0,0.7,0.5][c.team_rank-1] if c.team_rank in [1,2,3] else 0.3)) }}</td>
+        <td class="font-num score-strong">{{ fmt|format(rule.comp_coef[c.level][c.award] * team_factor.get(c.team_rank, team_factor[4])) }}</td>
         <td class="text-right">
           {% if not locked %}
           <form method="post" action="{{ url_for('delete_competition', cid=c.id) }}"
                 onsubmit="return confirm('删除这条竞赛记录？')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <button class="btn btn-ghost btn-sm text-fdu-red">删除</button>
           </form>
           {% endif %}
@@ -135,6 +139,7 @@
   {% if not locked %}
   <form method="post" action="{{ url_for('add_competition') }}"
         class="grid grid-cols-12 items-end gap-3 border-t border-line bg-[#fafbfc] px-5 py-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <div class="col-span-5">
       <label class="field-label">竞赛名称</label>
       <input name="name" class="input" placeholder="如 全国大学生市场调查与分析大赛" required />
@@ -204,11 +209,12 @@
         <td class="text-muted">{{ index_label[p.index_type] }}</td>
         <td class="font-num text-muted">第 {{ p.author_order }} 作者</td>
         <td class="text-muted">{{ p.publish_date or '—' }}</td>
-        <td class="font-num score-strong">{{ fmt|format(rule.paper_coef[p.index_type] * ([1.0,0.6,0.4][p.author_order-1] if p.author_order in [1,2,3] else 0.2)) }}</td>
+        <td class="font-num score-strong">{{ fmt|format(rule.paper_coef[p.index_type] * author_factor.get(p.author_order, author_factor[4])) }}</td>
         <td class="text-right">
           {% if not locked %}
           <form method="post" action="{{ url_for('delete_paper', pid=p.id) }}"
                 onsubmit="return confirm('删除这篇论文记录？')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <button class="btn btn-ghost btn-sm text-fdu-red">删除</button>
           </form>
           {% endif %}
@@ -223,6 +229,7 @@
   {% if not locked %}
   <form method="post" action="{{ url_for('add_paper') }}"
         class="grid grid-cols-12 items-end gap-3 border-t border-line bg-[#fafbfc] px-5 py-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     <div class="col-span-5">
       <label class="field-label">论文标题</label>
       <input name="title" class="input" placeholder="论文完整标题" required />

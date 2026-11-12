@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS sys_user (
     real_name       TEXT NOT NULL,
     status          INTEGER NOT NULL DEFAULT 1,    -- 1 正常 0 停用
     must_change_pwd INTEGER NOT NULL DEFAULT 1,    -- 首次登录强制改密（PRD 13 章）
+    failed_attempts INTEGER NOT NULL DEFAULT 0,    -- 连续登录失败次数（5 次锁定 30 分钟，PRD 13 章）
+    locked_until    TEXT,                          -- 锁定到期时间，空表示未锁定
     last_login_at   TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );

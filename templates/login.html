@@ -78,6 +78,7 @@
           {% endwith %}
 
           <form method="post" action="{{ url_for('login') }}" novalidate>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <div class="mt-5" role="group" aria-label="选择登录角色">
               <div class="grid grid-cols-3 gap-1 rounded-md bg-[#f4f6f8] p-1">
                 <button type="button" data-role="student" data-hint="请输入学号" aria-pressed="true" class="role-tab role-tab-active">学生</button>
@@ -144,7 +145,7 @@
 
           <div class="mt-4 rounded-md border border-dashed border-[#d6dde7] px-3 py-2 text-[11px] leading-5 text-muted">
             <span class="font-medium text-ink">演示账号</span>
-            （密码均为 <span class="font-num text-fdu-blue">wt2026</span>）·
+            （初始密码 <span class="font-num text-fdu-blue">wt2026</span>，首次登录需修改）·
             学生 <span class="font-num">2023010101</span> ·
             辅导员 <span class="font-num">T2001</span> ·
             管理员 <span class="font-num">A1001</span>

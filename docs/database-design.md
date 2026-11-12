@@ -20,7 +20,7 @@
 | `college` | 学院 | 目前只有「管理学院」一条 |
 | `major` | 专业 | 工商管理、会计学、信管、市场营销、物流管理 |
 | `class_group` | 班级 | 归属专业，绑定辅导员 |
-| `sys_user` | 统一账号 | 学号/工号、PBKDF2 哈希、四种角色 |
+| `sys_user` | 统一账号 | 学号/工号、PBKDF2 哈希、四种角色；`must_change_pwd` 首登强制改密、`failed_attempts` / `locked_until` 登录失败锁定（V1.0.1 起被 `app.py` 读取） |
 | `student` | 学生档案 | 绩点存这里，`enrollment_status` 非 ACTIVE 不参与排名 |
 | `competition` | 竞赛明细 | 级别 × 获奖等级 × 本人排名 |
 | `paper` | 论文明细 | 分区 × 作者排序 |

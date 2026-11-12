@@ -59,11 +59,13 @@
       {% if confirmed %}
       <form method="post" action="{{ url_for('withdraw_participation') }}" class="inline"
             onsubmit="return confirm('撤回后本条数据将退出排名并恢复可编辑，确定撤回吗？')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <button type="submit" class="btn btn-danger-outline">撤回确认</button>
       </form>
       {% else %}
       <form method="post" action="{{ url_for('confirm_participation') }}" class="inline"
             onsubmit="return confirm('确认后数据将被锁定并计入预估排名，冻结前可撤回。确定确认参与吗？')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <button type="submit" class="btn btn-primary" {{ 'disabled' if not stu.gpa }}>确认参与</button>
       </form>
       {% endif %}
@@ -167,18 +169,16 @@
   </div>
 </section>
 
-{% if confirmed %}
-<div class="mt-3 flex flex-wrap items-center gap-2 px-1 text-[12px]">
-  {% if gap is not none %}
-    {% if gap >= 0 %}
-      <span class="badge badge-blue">在保研线内</span>
-      <span class="text-muted">高出保研线 <strong class="font-num text-fdu-blue">{{ fmt|format(gap) }}</strong> 分，当前顺位 {{ me.rank_college }}</span>
-    {% else %}
-      <span class="badge badge-red">保研线外</span>
-      <span class="text-muted">距保研线 <strong class="font-num text-fdu-red">{{ fmt|format(-gap) }}</strong> 分，当前顺位 {{ me.rank_college }} / {{ stats.ranked }}</span>
-    {% endif %}
-    <span class="text-[#c3cad4]">|</span>
+{% if confirmed and gap is not none %}
+<div class="mt-3 flex items-center gap-2 px-1 text-[12px]">
+  {% if gap >= 0 %}
+    <span class="badge badge-blue">在保研线内</span>
+    <span class="text-muted">高出保研线 <strong class="font-num text-fdu-blue">{{ fmt|format(gap) }}</strong> 分，当前顺位 {{ me.rank_college }}</span>
+  {% else %}
+    <span class="badge badge-red">保研线外</span>
+    <span class="text-muted">距保研线 <strong class="font-num text-fdu-red">{{ fmt|format(-gap) }}</strong> 分，当前顺位 {{ me.rank_college }} / {{ stats.ranked }}</span>
   {% endif %}
+  <span class="text-[#c3cad4]">|</span>
   <span class="text-muted">专业内 <strong class="font-num text-ink">{{ me.rank_major }}</strong> 名</span>
   <span class="text-[#c3cad4]">|</span>
   <span class="text-muted">单项名次</span>

@@ -4,7 +4,7 @@
     python seed.py     # 第一次：生成演示数据
     python app.py      # 启动，浏览器打开 http://127.0.0.1:5000
 
-演示账号（密码统一 wt2026）：
+演示账号（初始密码统一 wt2026，首次登录须改密）：
     学生      2023010101  黄俊键
     辅导员    T2001
     学院管理员 A1001
@@ -13,20 +13,32 @@
 
 import csv
 import functools
+import hmac
 import io
 import json
 import os
-from datetime import datetime
+import secrets
+import time
+from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 from flask import (Flask, Response, abort, flash, redirect, render_template,
                    request, session, url_for)
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 import db as database
 import scoring
 from db import get_db
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+TS_FMT = "%Y-%m-%d %H:%M:%S"
+
+# PRD 13 章「认证与账号」：30 分钟无操作超时、连续 5 次错误锁定 30 分钟、密码 ≥8 位含字母与数字
+SESSION_IDLE_MINUTES = 30
+MAX_LOGIN_FAILURES = 5
+LOCK_MINUTES = 30
+PASSWORD_MIN_LEN = 8
 
 ROLE_LABEL = {
     "STUDENT": "学生",
@@ -107,19 +119,163 @@ def role_required(*roles):
 
 
 # ---------------------------------------------------------------
+# 安全与校验小工具
+# ---------------------------------------------------------------
+
+def load_secret_key():
+    """优先用环境变量；本地没有就生成一次并落到 instance/secret_key，避免进程重启后会话全失效。"""
+    env_key = os.environ.get("SECRET_KEY")
+    if env_key:
+        return env_key
+    path = os.path.join(BASE_DIR, "instance", "secret_key")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            saved = f.read().strip()
+        if saved:
+            return saved
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    generated = secrets.token_hex(32)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(generated)
+    print("[安全提示] 未设置 SECRET_KEY，已生成 instance/secret_key 供本地使用；"
+          "部署到服务器前请改用环境变量（HANDOFF 第九节）。")
+    return generated
+
+
+def csrf_token():
+    """为当前会话取（或生成）CSRF 令牌，模板里以隐藏域回传。"""
+    token = session.get("_csrf")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf"] = token
+    return token
+
+
+def safe_next(target):
+    """只允许站内相对路径，挡掉 //evil.com、http://evil.com 这类开放重定向。"""
+    if not target:
+        return url_for("home")
+    if not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return url_for("home")
+    parsed = urlparse(target)
+    if parsed.scheme or parsed.netloc:
+        return url_for("home")
+    return target
+
+
+def parse_ts(value):
+    """解析库里存的本地时间字符串。"""
+    if not value:
+        return None
+    for fmt in (TS_FMT, "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def validate_password(password, username="", old_password=""):
+    """PRD 13 章口令规则。返回错误信息或 None。"""
+    if not password:
+        return "新密码不能为空"
+    if len(password) < PASSWORD_MIN_LEN:
+        return f"新密码至少 {PASSWORD_MIN_LEN} 位"
+    if not any(ch.isalpha() for ch in password) or not any(ch.isdigit() for ch in password):
+        return "新密码须同时包含字母与数字"
+    if password == username:
+        return "新密码不能与学号 / 工号相同"
+    if old_password and password == old_password:
+        return "新密码不能与当前密码相同"
+    return None
+
+
+def normalize_date(raw, label):
+    """日期统一成 YYYY-MM-DD；空值允许（留空表示未填）。返回 (值, 错误信息)。"""
+    text = (raw or "").strip()
+    if not text:
+        return "", None
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").strftime("%Y-%m-%d"), None
+    except ValueError:
+        return None, f"{label}格式应为 YYYY-MM-DD，例如 2026-05-20"
+
+
+def parse_rank(raw, allowed, label):
+    """解析「本人第几位」这类序位字段，返回 (值, 错误信息)。
+
+    不能用 request.form.get(..., type=int) or 1：转换失败会返回 None，
+    再被 or 兜底成第 1 位，等于乱填反而拿到最高折算系数（1.0）。
+    所以这里区分三种情况：留空、不是数字、超出范围，一律拒绝。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None, f"请选择{label}"
+    try:
+        value = int(text)
+    except ValueError:
+        return None, f"{label}须为 {min(allowed)}–{max(allowed)} 的数字"
+    if value not in allowed:
+        return None, f"{label}须为第 {min(allowed)}–{max(allowed)} 位（第 {max(allowed)} 位及以后按第 {max(allowed)} 位折算）"
+    return value, None
+
+
+def csv_safe(value):
+    """挡住 CSV 公式注入：以 = + - @ 或制表符开头的单元格前面补单引号。"""
+    if value is None:
+        return ""
+    text = str(value)
+    if text[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + text
+    return text
+
+
+# ---------------------------------------------------------------
 # 应用工厂
 # ---------------------------------------------------------------
 
 def create_app():
     app = Flask(__name__)
-    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "wtu-som-baoyan-dev-key")
+    app.config["SECRET_KEY"] = load_secret_key()
     app.config["JSON_AS_ASCII"] = False
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=SESSION_IDLE_MINUTES)
     database.register(app)
+
+    @app.before_request
+    def guard_request():
+        # 静态资源不参与会话校验，否则超时后页面样式/脚本会 302 成 HTML
+        if request.endpoint == "static":
+            return None
+
+        # 1）CSRF：所有写操作必须带本会话的令牌（PRD 13 / 测试报告 P2-3）
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            sent = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token", "")
+            expected = session.get("_csrf")
+            if not expected or not sent or not hmac.compare_digest(expected, sent):
+                abort(400, "表单已过期或来源校验失败，请刷新页面后重新提交")
+
+        # 2）会话空闲超时（PRD 13：30 分钟无操作）
+        if session.get("uid"):
+            last_seen = session.get("_seen_at")
+            now_ts = time.time()
+            if last_seen and now_ts - last_seen > SESSION_IDLE_MINUTES * 60:
+                session.clear()
+                flash("登录状态已超时（30 分钟无操作），请重新登录", "error")
+                return redirect(url_for("login"))
+            session["_seen_at"] = now_ts
+
+        # 3）首次登录强制改密（schema.must_change_pwd，PRD 13）
+        if session.get("uid") and session.get("must_change_pwd"):
+            if request.endpoint not in ("change_password", "logout", "static"):
+                return redirect(url_for("change_password"))
 
     @app.context_processor
     def inject_globals():
         return {
             "role_label": ROLE_LABEL,
+            "csrf_token": csrf_token(),
             "current_user": {
                 "name": session.get("name"),
                 "role": session.get("role"),
@@ -145,9 +301,39 @@ def create_app():
                 "SELECT * FROM sys_user WHERE username = ?", (username,)
             ).fetchone()
 
+            now = datetime.now()
+
+            # 锁定中直接拒绝，不给逐次试探的机会（PRD 13：连续 5 次错误锁定 30 分钟）
+            if user is not None:
+                locked_until = parse_ts(user["locked_until"])
+                if locked_until and locked_until > now:
+                    minutes = int((locked_until - now).total_seconds() // 60) + 1
+                    flash(f"密码连续输错 {MAX_LOGIN_FAILURES} 次，账号已锁定，请 {minutes} 分钟后再试", "error")
+                    return render_template("login.html", account=username), 429
+
             if user is None or not check_password_hash(user["password_hash"], password):
-                flash("账号或密码不正确，请重新输入", "error")
+                if user is not None:
+                    fails = (user["failed_attempts"] or 0) + 1
+                    if fails >= MAX_LOGIN_FAILURES:
+                        db.execute(
+                            "UPDATE sys_user SET failed_attempts = 0, locked_until = ? WHERE id = ?",
+                            ((now + timedelta(minutes=LOCK_MINUTES)).strftime(TS_FMT), user["id"]),
+                        )
+                        log_action(db, "账号锁定", "sys_user", user["id"],
+                                   f"连续 {MAX_LOGIN_FAILURES} 次密码错误，锁定 {LOCK_MINUTES} 分钟")
+                        db.commit()
+                        flash(f"密码连续错误 {MAX_LOGIN_FAILURES} 次，账号已锁定 {LOCK_MINUTES} 分钟", "error")
+                        return render_template("login.html", account=username), 429
+                    db.execute("UPDATE sys_user SET failed_attempts = ? WHERE id = ?",
+                               (fails, user["id"]))
+                    log_action(db, "登录失败", "sys_user", user["id"],
+                               f"账号 {username} 密码错误（第 {fails} 次）")
+                    db.commit()
+                    flash(f"账号或密码不正确，请重新输入（连续错误 {MAX_LOGIN_FAILURES} 次将锁定账号）", "error")
+                else:
+                    flash("账号或密码不正确，请重新输入", "error")
                 return render_template("login.html", account=username), 401
+
             if user["status"] != 1:
                 flash("该账号已停用，请联系学院管理员", "error")
                 return render_template("login.html", account=username), 403
@@ -156,17 +342,67 @@ def create_app():
             session["uid"] = user["id"]
             session["role"] = user["role"]
             session["name"] = user["real_name"]
+            session["must_change_pwd"] = 1 if user["must_change_pwd"] else 0
             session.permanent = True
+            session["_seen_at"] = time.time()
+            csrf_token()   # 登录成功后重发令牌，避免沿用登录前的会话标识
 
-            db.execute("UPDATE sys_user SET last_login_at = ? WHERE id = ?",
-                       (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user["id"]))
+            db.execute(
+                "UPDATE sys_user SET last_login_at = ?, failed_attempts = 0, locked_until = NULL "
+                "WHERE id = ?",
+                (now.strftime(TS_FMT), user["id"]),
+            )
             log_action(db, "登录系统", "sys_user", user["id"])
             db.commit()
-            return redirect(request.args.get("next") or url_for("home"))
+
+            if session["must_change_pwd"]:
+                flash("首次登录请先修改初始密码后再使用系统", "info")
+                return redirect(url_for("change_password"))
+            return redirect(safe_next(request.args.get("next")))
 
         if "uid" in session:
             return redirect(url_for("home"))
         return render_template("login.html", account="")
+
+    @app.route("/account/password", methods=["GET", "POST"])
+    @login_required
+    def change_password():
+        """首次登录强制改密 / 主动修改密码（PRD 13）。"""
+        db = get_db()
+        user = db.execute("SELECT * FROM sys_user WHERE id = ?", (session["uid"],)).fetchone()
+        if user is None:
+            session.clear()
+            abort(403, "账号不存在")
+        forced = bool(user["must_change_pwd"])
+
+        if request.method == "POST":
+            old_password = request.form.get("old_password", "")
+            new_password = request.form.get("new_password", "")
+            confirm_password = request.form.get("confirm_password", "")
+
+            if not check_password_hash(user["password_hash"], old_password):
+                flash("当前密码不正确", "error")
+                return render_template("account/password.html", forced=forced), 400
+            err = validate_password(new_password, user["username"], old_password)
+            if err:
+                flash(err, "error")
+                return render_template("account/password.html", forced=forced), 400
+            if new_password != confirm_password:
+                flash("两次输入的新密码不一致", "error")
+                return render_template("account/password.html", forced=forced), 400
+
+            db.execute(
+                "UPDATE sys_user SET password_hash = ?, must_change_pwd = 0 WHERE id = ?",
+                (generate_password_hash(new_password, method="pbkdf2:sha256"), user["id"]),
+            )
+            log_action(db, "修改密码", "sys_user", user["id"],
+                       "首次登录改密" if forced else "主动修改")
+            db.commit()
+            session["must_change_pwd"] = 0
+            flash("密码已更新", "success")
+            return redirect(url_for("home"))
+
+        return render_template("account/password.html", forced=forced)
 
     @app.route("/logout")
     def logout():
@@ -285,6 +521,9 @@ def create_app():
             level_label=scoring.LEVEL_LABEL,
             award_label=scoring.AWARD_LABEL,
             index_label=scoring.INDEX_LABEL,
+            # 折算系数从 scoring 取，不在模板里写死，避免改规则后页面算分与实际不一致
+            team_factor=scoring.TEAM_RANK_FACTOR,
+            author_factor=scoring.AUTHOR_ORDER_FACTOR,
         )
 
     @app.route("/student/gpa", methods=["POST"])
@@ -308,12 +547,16 @@ def create_app():
             flash("绩点取值范围为 0–5.00，请检查后重新填写", "error")
             return redirect(url_for("student_entry"))
 
+        # 统一走 scoring.round2（Decimal + ROUND_HALF_UP），不用内置 round()，
+        # 否则 4.625 会存成 4.62，与项目规范和数据准确性要求不符
+        gpa_value = scoring.round2(gpa)
+
         before = stu["gpa"]
         db.execute(
             "UPDATE student SET gpa = ?, gpa_updated_at = ? WHERE id = ?",
-            (round(gpa, 2), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), stu["id"]),
+            (gpa_value, datetime.now().strftime(TS_FMT), stu["id"]),
         )
-        log_action(db, "修改绩点", "student", stu["id"], f"{before} → {round(gpa, 2)}")
+        log_action(db, "修改绩点", "student", stu["id"], f"{before} → {gpa_value}")
         db.commit()
         flash("绩点已保存", "success")
         return redirect(url_for("student_entry"))
@@ -336,12 +579,21 @@ def create_app():
             flash("竞赛名称、级别、获奖等级均为必填项", "error")
             return redirect(url_for("student_entry"))
 
+        team_rank, rank_err = parse_rank(
+            request.form.get("team_rank"), scoring.TEAM_RANK_FACTOR, "本人排名")
+        if rank_err:
+            flash(rank_err, "error")
+            return redirect(url_for("student_entry"))
+
+        award_date, date_err = normalize_date(request.form.get("award_date"), "获奖时间")
+        if date_err:
+            flash(date_err, "error")
+            return redirect(url_for("student_entry"))
+
         db.execute(
             "INSERT INTO competition (student_id, year, name, level, award, team_rank, award_date, status) "
             "VALUES (?,?,?,?,?,?,?, 'DRAFT')",
-            (stu["id"], year, name, level, award,
-             request.form.get("team_rank", type=int) or 1,
-             request.form.get("award_date", "")),
+            (stu["id"], year, name, level, award, team_rank, award_date),
         )
         log_action(db, "新增竞赛", "competition", None, name)
         db.commit()
@@ -360,7 +612,7 @@ def create_app():
             abort(404)
 
         # PRD 8.2：已提交、已通过及冻结后的数据不可删除，仅草稿可删。
-        # 页面上的删除按钮在锁定态不渲染，但接口必须自己拦——
+        # 页面上锁定态的删除按钮不渲染，但接口必须自己拦——
         # 否则构造一个 POST 就能绕过界面删掉已计入排名的数据。
         part = get_participation(db, stu["id"], year)
         if part and part["status"] == "CONFIRMED":
@@ -393,12 +645,22 @@ def create_app():
             flash("论文标题与收录类型为必填项", "error")
             return redirect(url_for("student_entry"))
 
+        author_order, rank_err = parse_rank(
+            request.form.get("author_order"), scoring.AUTHOR_ORDER_FACTOR, "作者排序")
+        if rank_err:
+            flash(rank_err, "error")
+            return redirect(url_for("student_entry"))
+
+        publish_date, date_err = normalize_date(request.form.get("publish_date"), "发表时间")
+        if date_err:
+            flash(date_err, "error")
+            return redirect(url_for("student_entry"))
+
         db.execute(
             "INSERT INTO paper (student_id, year, title, venue, index_type, author_order, "
             "publish_date, status) VALUES (?,?,?,?,?,?,?, 'DRAFT')",
             (stu["id"], year, title, request.form.get("venue", ""), index_type,
-             request.form.get("author_order", type=int) or 1,
-             request.form.get("publish_date", "")),
+             author_order, publish_date),
         )
         log_action(db, "新增论文", "paper", None, title)
         db.commit()
@@ -447,7 +709,7 @@ def create_app():
             flash("请先填写绩点后再确认参与", "error")
             return redirect(url_for("student_entry"))
 
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now().strftime(TS_FMT)
         if part:
             db.execute(
                 "UPDATE participation SET status = 'CONFIRMED', confirmed_at = ? WHERE id = ?",
@@ -521,8 +783,8 @@ def create_app():
         writer.writerow(["顺位", "姓名", "学号", "专业", "班级",
                          "绩点", "绩点折算", "竞赛折算", "论文折算", "综合成绩"])
         for r in ranking["rows"]:
-            writer.writerow([r["rank_college"], r["name"], r["student_no"],
-                             r["major_name"], r["class_name"] or "",
+            writer.writerow([r["rank_college"], csv_safe(r["name"]), csv_safe(r["student_no"]),
+                             csv_safe(r["major_name"]), csv_safe(r["class_name"] or ""),
                              r["gpa"], r["gpa_score"], r["comp_score"],
                              r["paper_score"], r["total"]])
 
@@ -560,11 +822,8 @@ def create_app():
                 return redirect(url_for("admin_rules"))
 
             old = scoring.load_rule(db, year)
-            db.execute(
-                "UPDATE score_rule SET gpa_weight = ?, comp_weight = ?, paper_weight = ?, "
-                "status = 'ARCHIVED' WHERE id = ?",
-                (gpa_w, comp_w, paper_w, old["id"]),
-            )
+            # 历史版本只改状态，不覆盖其权重——否则「历史版本可查、可对比」就失效了
+            db.execute("UPDATE score_rule SET status = 'ARCHIVED' WHERE id = ?", (old["id"],))
             db.execute(
                 """INSERT INTO score_rule
                    (year, version, gpa_weight, comp_weight, paper_weight, gpa_scale,
@@ -575,7 +834,7 @@ def create_app():
                  json.dumps(old["comp_coef"], ensure_ascii=False),
                  json.dumps(old["paper_coef"], ensure_ascii=False),
                  old["comp_cap"], old["paper_cap"],
-                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"), session.get("uid")),
+                 datetime.now().strftime(TS_FMT), session.get("uid")),
             )
             log_action(db, "修改评分权重", "score_rule", year,
                        f"{old['gpa_weight']}/{old['comp_weight']}/{old['paper_weight']} → "
@@ -601,6 +860,11 @@ def create_app():
 
     # ---------- 错误页 ----------
 
+    @app.errorhandler(400)
+    def bad_request(e):
+        return render_template("error.html", code=400,
+                               message=getattr(e, "description", "请求参数不正确")), 400
+
     @app.errorhandler(403)
     def forbidden(e):
         return render_template("error.html", code=403, message="你没有权限访问这个页面"), 403
@@ -620,6 +884,8 @@ if __name__ == "__main__":
     print("  保研评估系统  ·  武汉纺织大学管理学院")
     print("  打开浏览器访问：http://127.0.0.1:5000")
     print("  学生 2023010101 / 辅导员 T2001 / 管理员 A1001")
-    print("  密码统一：wt2026")
+    print("  初始密码：wt2026（首次登录须修改）")
     print("=" * 56)
-    app.run(debug=True, port=5000)
+    # debug 由环境变量控制，默认关闭；需要调试时 set FLASK_DEBUG=1
+    app.run(debug=os.environ.get("FLASK_DEBUG", "0") == "1",
+            port=int(os.environ.get("PORT", "5000")))

@@ -16,12 +16,12 @@
 import json
 from decimal import Decimal, ROUND_HALF_UP
 
-# 团队排名折算系数：本人是第几作者 / 第几位参赛者
-TEAM_RANK_FACTOR = {1: 1.0, 2: 0.7, 3: 0.5}
+# 团队排名折算系数：本人是第几作者 / 第几位参赛者（第 4 位及以后同 0.3）
+TEAM_RANK_FACTOR = {1: 1.0, 2: 0.7, 3: 0.5, 4: 0.3}
 TEAM_RANK_DEFAULT = 0.3
 
-# 论文作者排序折算系数
-AUTHOR_ORDER_FACTOR = {1: 1.0, 2: 0.6, 3: 0.4}
+# 论文作者排序折算系数（第 4 位及以后同 0.2）
+AUTHOR_ORDER_FACTOR = {1: 1.0, 2: 0.6, 3: 0.4, 4: 0.2}
 AUTHOR_ORDER_DEFAULT = 0.2
 
 LEVEL_LABEL = {"NATIONAL": "国家级", "PROVINCIAL": "省级", "SCHOOL": "校级"}
@@ -77,10 +77,12 @@ def load_rule(db, year):
 
 
 def validate_rule(gpa_w, comp_w, paper_w):
-    """校验权重：必须非负且合计 100。返回错误信息或 None。"""
+    """校验权重：必须非负、单项不超过 100 且合计 100。返回错误信息或 None。"""
     for name, w in (("绩点", gpa_w), ("竞赛", comp_w), ("论文", paper_w)):
         if w is None or w < 0:
             return f"{name}权重不能为负数"
+        if w > 100:
+            return f"{name}权重不能超过 100%"
     if round2(_d(gpa_w) + _d(comp_w) + _d(paper_w)) != 100.00:
         return f"三项权重合计必须为 100%，当前为 {round2(_d(gpa_w) + _d(comp_w) + _d(paper_w))}%"
     return None

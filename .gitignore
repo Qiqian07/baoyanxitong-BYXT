@@ -9,6 +9,8 @@ env/
 # 运行期生成：数据库可由 seed.py 重建，不入库
 instance/*.db
 instance/*.sqlite3
+instance/secret_key
+instance/*.log
 
 # 构建产物与交接包
 *.zip

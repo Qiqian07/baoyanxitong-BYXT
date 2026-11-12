@@ -32,6 +32,7 @@
       <p class="mt-1 text-[11px] text-muted">三项合计必须为 100%，保存后生成新版本并立即重算排名</p>
     </div>
     <form method="post" action="{{ url_for('admin_rules') }}" class="px-5 py-5">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <div class="space-y-4">
         {% for f in [
             {'name':'gpa_weight','label':'绩点折算','value':rule.gpa_weight,'hint':'学业成绩权重，通常占比最高'},

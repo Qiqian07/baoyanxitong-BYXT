@@ -28,6 +28,8 @@ TOTAL_STUDENTS = 146
 CONFIRM_COUNT = 126              # 覆盖率 126/146 = 86.3%
 QUOTA = 12                       # 保研名额
 PASSWORD = "wt2026"              # 演示用统一初始密码
+# 演示账号一律写 must_change_pwd = 0（视为已自行改密），避免每次演示都要先改密；
+# 真实新建 / 批量导入的账号该字段为 1，登录后会被强制跳转改密页（app.py · change_password）。
 
 random.seed(20261109)
 
