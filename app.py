@@ -47,6 +47,22 @@ ROLE_LABEL = {
     "SCHOOL_ADMIN": "学校管理员",
 }
 
+# 登录页顶部的身份标签。标签只做「入口校验」：真正的权限永远以
+# sys_user.role 为准（所以即使绕过标签也进不了别的角色的页面）。
+# 但为什么还要校验？因为不校验的话，学生账号从「辅导员」入口一样能登成功，
+# 演示时看起来就像没做隔离。这里直接拦住，并给出该切到哪个入口的提示。
+LOGIN_TABS = {
+    "student": ({"STUDENT"}, "学生", "请输入学号"),
+    "counselor": ({"COUNSELOR"}, "辅导员", "请输入工号"),
+    "admin": ({"COLLEGE_ADMIN", "SCHOOL_ADMIN"}, "管理员", "请输入工号"),
+}
+ROLE_TAB = {
+    "STUDENT": "student",
+    "COUNSELOR": "counselor",
+    "COLLEGE_ADMIN": "admin",
+    "SCHOOL_ADMIN": "admin",
+}
+
 
 # ---------------------------------------------------------------
 # 通用小工具
@@ -62,12 +78,22 @@ def get_config(db, key, default=""):
     return row["value"] if row else default
 
 
-def log_action(db, action, target_type=None, target_id=None, detail=None):
-    """写审计日志。PRD 要求所有数据变动留痕，统一收敛到这一个函数。"""
+def log_action(db, action, target_type=None, target_id=None, detail=None, actor=None):
+    """写审计日志。PRD 要求所有数据变动留痕，统一收敛到这一个函数。
+
+    登录前后还没有 session（密码错误、账号锁定、身份与入口不符），
+    这时 actor_* 取不到值，日志里操作人会是空的。这类事件由调用方
+    用 actor=(用户id, 姓名, 角色) 显式传入。
+    """
+    if actor:
+        actor_id, actor_name, actor_role = actor
+    else:
+        actor_id, actor_name, actor_role = (
+            session.get("uid"), session.get("name"), session.get("role"))
     db.execute(
         "INSERT INTO audit_log (actor_id, actor_name, role, action, target_type, target_id, detail, ip) "
         "VALUES (?,?,?,?,?,?,?,?)",
-        (session.get("uid"), session.get("name"), session.get("role"),
+        (actor_id, actor_name, actor_role,
          action, target_type, str(target_id) if target_id is not None else None,
          detail, request.remote_addr),
     )
@@ -296,6 +322,10 @@ def create_app():
         if request.method == "POST":
             username = request.form.get("account", "").strip()
             password = request.form.get("password", "")
+            # 用户点的是哪个身份标签；非法值一律按「学生」处理，避免伪造参数绕过校验
+            tab = request.form.get("role", "student")
+            if tab not in LOGIN_TABS:
+                tab = "student"
             db = get_db()
             user = db.execute(
                 "SELECT * FROM sys_user WHERE username = ?", (username,)
@@ -309,7 +339,7 @@ def create_app():
                 if locked_until and locked_until > now:
                     minutes = int((locked_until - now).total_seconds() // 60) + 1
                     flash(f"密码连续输错 {MAX_LOGIN_FAILURES} 次，账号已锁定，请 {minutes} 分钟后再试", "error")
-                    return render_template("login.html", account=username), 429
+                    return render_template("login.html", account=username, active_tab=tab), 429
 
             if user is None or not check_password_hash(user["password_hash"], password):
                 if user is not None:
@@ -320,23 +350,43 @@ def create_app():
                             ((now + timedelta(minutes=LOCK_MINUTES)).strftime(TS_FMT), user["id"]),
                         )
                         log_action(db, "账号锁定", "sys_user", user["id"],
-                                   f"连续 {MAX_LOGIN_FAILURES} 次密码错误，锁定 {LOCK_MINUTES} 分钟")
+                                   f"连续 {MAX_LOGIN_FAILURES} 次密码错误，锁定 {LOCK_MINUTES} 分钟",
+                                   actor=(user["id"], user["real_name"], user["role"]))
                         db.commit()
                         flash(f"密码连续错误 {MAX_LOGIN_FAILURES} 次，账号已锁定 {LOCK_MINUTES} 分钟", "error")
-                        return render_template("login.html", account=username), 429
+                        return render_template("login.html", account=username, active_tab=tab), 429
                     db.execute("UPDATE sys_user SET failed_attempts = ? WHERE id = ?",
                                (fails, user["id"]))
                     log_action(db, "登录失败", "sys_user", user["id"],
-                               f"账号 {username} 密码错误（第 {fails} 次）")
+                               f"账号 {username} 密码错误（第 {fails} 次）",
+                               actor=(user["id"], user["real_name"], user["role"]))
                     db.commit()
                     flash(f"账号或密码不正确，请重新输入（连续错误 {MAX_LOGIN_FAILURES} 次将锁定账号）", "error")
                 else:
                     flash("账号或密码不正确，请重新输入", "error")
-                return render_template("login.html", account=username), 401
+                return render_template("login.html", account=username, active_tab=tab), 401
 
             if user["status"] != 1:
                 flash("该账号已停用，请联系学院管理员", "error")
-                return render_template("login.html", account=username), 403
+                return render_template("login.html", account=username, active_tab=tab), 403
+
+            # 入口与账号身份必须一致：学生账号从「辅导员」入口登进来，
+            # 数据层面本来就进不去（role_required 会 403），但登录却成功，
+            # 演示时看起来就像没做隔离，所以在这里直接拦住并指路。
+            allowed_roles, tab_label, _hint = LOGIN_TABS[tab]
+            if user["role"] not in allowed_roles:
+                actual_tab = ROLE_TAB.get(user["role"], "student")
+                actual_label = LOGIN_TABS[actual_tab][1]
+                flash(
+                    f"「{username}」是{ROLE_LABEL.get(user['role'], user['role'])}账号，"
+                    f"不能从「{tab_label}」入口登录。已切到「{actual_label}」入口，请重新输入密码。",
+                    "error",
+                )
+                log_action(db, "登录被拒", "sys_user", user["id"],
+                           f"身份与入口不符：选择「{tab_label}」，实际角色 {user['role']}",
+                           actor=(user["id"], user["real_name"], user["role"]))
+                db.commit()
+                return render_template("login.html", account=username, active_tab=actual_tab), 403
 
             session.clear()
             session["uid"] = user["id"]
@@ -362,7 +412,7 @@ def create_app():
 
         if "uid" in session:
             return redirect(url_for("home"))
-        return render_template("login.html", account="")
+        return render_template("login.html", account="", active_tab="student")
 
     @app.route("/account/password", methods=["GET", "POST"])
     @login_required

@@ -66,7 +66,7 @@
 
           <div class="mt-7">
             <h1 id="login-title" class="text-[24px] font-semibold tracking-tight text-ink">登录</h1>
-            <p class="mt-1.5 text-[13px] text-muted">请使用学号或工号登录，系统自动识别角色</p>
+            <p class="mt-1.5 text-[13px] text-muted">请先选择身份，再用学号 / 工号登录</p>
           </div>
 
           {% with messages = get_flashed_messages(with_categories=true) %}
@@ -81,11 +81,13 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <div class="mt-5" role="group" aria-label="选择登录角色">
               <div class="grid grid-cols-3 gap-1 rounded-md bg-[#f4f6f8] p-1">
-                <button type="button" data-role="student" data-hint="请输入学号" aria-pressed="true" class="role-tab role-tab-active">学生</button>
-                <button type="button" data-role="counselor" data-hint="请输入工号" aria-pressed="false" class="role-tab">辅导员</button>
-                <button type="button" data-role="admin" data-hint="请输入工号" aria-pressed="false" class="role-tab">管理员</button>
+                {% for key, label, hint in [('student', '学生', '请输入学号'), ('counselor', '辅导员', '请输入工号'), ('admin', '管理员', '请输入工号')] %}
+                <button type="button" data-role="{{ key }}" data-hint="{{ hint }}"
+                        aria-pressed="{{ 'true' if active_tab == key else 'false' }}"
+                        class="role-tab{{ ' role-tab-active' if active_tab == key else '' }}">{{ label }}</button>
+                {% endfor %}
               </div>
-              <input type="hidden" name="role" id="role-input" value="student" />
+              <input type="hidden" name="role" id="role-input" value="{{ active_tab }}" />
             </div>
 
             <div class="mt-5">
@@ -97,7 +99,8 @@
                   </svg>
                 </span>
                 <input id="account" name="account" type="text" class="input pl-10" value="{{ account }}"
-                       placeholder="请输入学号" autocomplete="username" required />
+                       placeholder="{{ '请输入学号' if active_tab == 'student' else '请输入工号' }}"
+                       autocomplete="username" required />
               </div>
             </div>
 
