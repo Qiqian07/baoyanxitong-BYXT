@@ -29,6 +29,10 @@
 4. 看到「综合成绩 91.60」= 环境正常
 ```
 
+`run.bat` 会把找到的 Python 打印成 `Interpreter: ...`，随后交给 `launcher.py` 执行：装依赖 → 建演示数据 → 挑端口 → 开浏览器。
+
+**双击没反应**，按这个顺序分诊：没打印 `Interpreter` 就是没找到 Python（装官方版并勾 `Add to PATH`）；打印了但报 `No module named flask` 就是那个 Python 没 pip；停在 `[Window can be closed]` 说明启动失败，往上翻报错原文。也可以绕过 bat 直接 `python launcher.py`，提示更全。
+
 如果看不到 91.60，先别改代码，按 README 底部「常见问题」排查。**91.60 是健康检查锚点**，这个数不对说明数据库或引擎被我改坏了（或者你自己改坏了）。
 
 ---

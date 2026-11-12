@@ -8,7 +8,7 @@
 
 ## 怎么跑起来
 
-**方式一（推荐）**：双击 `run.bat`，等浏览器打开。
+**方式一（推荐）**：双击 `run.bat`。它会自己找 Python、缺依赖就装、建好演示数据，然后自动打开浏览器。
 
 **方式二（命令行）**：
 
@@ -17,6 +17,16 @@ pip install -r requirements.txt
 python seed.py      # 第一次运行：建库 + 生成演示数据
 python app.py       # 启动，访问 http://127.0.0.1:5000
 ```
+
+**方式三（也是命令行，但把检查都做掉）**：
+
+```bash
+python launcher.py   # 装依赖 / 建库 / 自动挑端口 / 自动开浏览器
+```
+
+`run.bat` 只做一件事：找到能用的 Python，然后交给 `launcher.py`。它分三轮找——**先找已经装了 Flask 的**，再找有 pip 的，最后才退而求其次。这样能避开「能跑但没 pip」的 MSYS2 / 商店占位 Python 这类坑。
+
+> `run.bat` 里**不放中文**：cmd 解析 .bat 时按 ANSI 读，UTF-8 中文会让它读错位、把行截断（典型症状是 `'hon' is not recognized`、`call :label` 丢了 `call :`）。所有中文提示都在 `launcher.py` 里输出。
 
 演示账号（密码统一 `wt2026`）：
 
@@ -154,6 +164,15 @@ instance/secret_key     会话密钥（首次启动自动生成，不入库）
 - 生产部署前必须：设 `SECRET_KEY` 环境变量、不要开 `FLASK_DEBUG`、换成 MySQL 或 PostgreSQL、加 HTTPS。
 
 ## 常见问题
+
+**双击 `run.bat` 没反应 / 黑窗口一闪就没了？** 按这个顺序看：
+
+1. 现在 `run.bat` 会先打印 `Interpreter: ...`。**没有这一行**说明根本没找到 Python，窗口里会给出 python.org 的下载地址——装的时候记得勾 `Add python.exe to PATH`。
+2. **有这一行但报 `No module named flask`**：说明挑中的那个 Python 没有 pip。直接跑 `python launcher.py` 看完整提示，或换成官方 Python。
+3. **报 `Address already in use` / `WinError 10048`**：上一次的服务没关干净。`launcher.py` 会自动改用 5001，所以正常情况不会再出现；真遇到了就关掉旧窗口，或用任务管理器结束 `python.exe`。
+4. **窗口停在 `[Window can be closed] Press any key to exit.`**：说明启动失败退出了，往上翻找红色的报错原文，发给负责人。
+
+**怎么确认服务真的起来了？** 浏览器打开 http://127.0.0.1:5000 ，看到登录页就对了；黑窗口里应该有一行 `* Running on http://127.0.0.1:5000`。
 
 **页面样式乱了？** 确认 `static/js/tailwind.js` 存在。这个文件是本地 Tailwind，缺了会只剩基础样式。
 
